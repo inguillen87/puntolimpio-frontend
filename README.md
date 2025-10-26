@@ -15,9 +15,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ioutoX5Po34K12pehTbK_k
 
 1. Install dependencies:
    `npm install`
-2. Configura el proveedor de IA remoto mediante `VITE_AI_PROVIDER` en [.env.local](.env.local). El valor por defecto es `openai,gemini`, lo que activa OpenAI como primera opción y Gemini como respaldo automático. También puedes usar:
+2. Configura el proveedor de IA remoto mediante `VITE_AI_PROVIDER` en [.env.local](.env.local). El valor por defecto es `gemini,openai`, lo que activa Gemini como primera opción y OpenAI como respaldo automático. También puedes usar:
    - `openai` o `gemini` para forzar un único proveedor (requieren `VITE_OPENAI_API_KEY` o `VITE_GEMINI_API_KEY`).
-   - Listas separadas por comas para definir la prioridad manualmente (por ejemplo, `gemini,openai`).
+   - Listas separadas por comas para definir la prioridad manualmente (por ejemplo, `openai,gemini`).
    - `none` para deshabilitar completamente el LLM y trabajar solo con QR/OCR local.
    El pipeline redimensiona las imágenes a 1024 px, las convierte a WEBP, cachea los resultados por hash y ejecuta QR/Tesseract antes de consumir el LLM.
 3. Run the app:
