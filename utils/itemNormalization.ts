@@ -22,7 +22,8 @@ const formatToken = (token: string) => {
   if (!token) return token;
   const hasDigits = /\d/.test(token);
   if (hasDigits) {
-    return correctAlphaNumericToken(token.replace(/[\s_-]+/g, '').toUpperCase());
+    const collapsed = token.replace(/[\s_-]+/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+    return correctAlphaNumericToken(collapsed.toUpperCase());
   }
   if (token.length <= 3) {
     return token.toUpperCase();
@@ -37,7 +38,8 @@ export const normalizeItemName = (raw: string): string => {
     .filter(Boolean)
     .map(token => formatToken(token))
     .map(token => correctAlphaNumericToken(token));
-  return tokens.join(' ');
+  const normalized = tokens.join(' ');
+  return normalized.replace(/\b([A-Z]{1,5})\s+(\d{2,4})\b/g, '$1$2');
 };
 
 export const canonicalItemKey = (raw: string): string => {
