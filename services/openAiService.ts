@@ -116,18 +116,18 @@ const controlSchema = {
 const buildJsonPrompt = (docType: DocumentType) => {
   if (docType === DocumentType.CONTROL) {
     return {
-      instruction: `Analiza con muchísima atención la planilla de control horizontal adjunta. Tu misión es transformar CADA FILA con datos en un objeto JSON dentro de un array. Pon especial foco en interpretar caligrafía, fechas y cantidades.
+      instruction: `Analiza con extremo detalle la planilla de control horizontal adjunta. Cada FILA con datos debe convertirse en un objeto dentro de un ARRAY JSON. Lee con mucha atención la caligrafía para evitar confusiones.
 
 Para cada fila extrae:
-- deliveryDate: el valor de la columna "FECHA ENTREGA" en formato DD/MM o DD/MM/YY.
-- quantity: el número exacto de la columna "CANTIDAD KITS".
-- model: el texto de la columna "MODELO" tal como aparece, corrigiendo mayúsculas/minúsculas.
-- destination: el texto de "DESTINO" si existe. Si el destino está vacío pero la fila anterior lo tiene, reutiliza ese valor. Si no hay destino disponible, omite la propiedad.
+- deliveryDate: copia el valor de la columna "FECHA ENTREGA" en formato DD/MM o DD/MM/YY.
+- quantity: el número exacto de la columna "CANTIDAD KITS". Si ves símbolos como comillas o espacios, interpreta el número real escrito.
+- model: el texto completo de la columna "MODELO" manteniendo códigos como "LM200", "MRZ", "JEG" o "ATRIA". Evita confundir "LM" con "CM" o insertar espacios adicionales en códigos alfanuméricos.
+- destination: toma el texto de la columna "DESTINO" cuando exista. Si la celda está vacía pero la fila anterior tiene destino, reutiliza ese valor. Si realmente no hay destino, omite la propiedad.
 
 Reglas esenciales:
-- No omitas filas con modelo y cantidad válidos, incluso si el destino está en blanco.
-- Ignora columnas irrelevantes como "REMITO HT", "ENTREGA", "RETIRA", "FIRMA" y "FECHA TERMINADO".
-- Respeta el formato de salida: únicamente devuelve un ARRAY JSON válido con objetos que usen exactamente las propiedades solicitadas. Nada de texto adicional.`,
+- No omitas filas que tengan modelo y cantidad válidos, incluso si el destino está en blanco o ilegible.
+- Ignora completamente las columnas "REMITO HT", "ENTREGA", "RETIRA", "FIRMA" y "FECHA TERMINADO".
+- Respeta el formato solicitado: devuelve ÚNICAMENTE un ARRAY JSON válido con los objetos descritos. No agregues texto adicional ni comentarios.`,
       schema: controlSchema,
     };
   }
@@ -136,20 +136,26 @@ Reglas esenciales:
     instruction: `Analiza con extrema atención el remito o factura adjunto. Debes leer la caligrafía con precisión para interpretar números y texto.
 
 REGLAS CRÍTICAS PARA NÚMEROS ESCRITOS A MANO:
-- Precisión total: si dudas, revisa de nuevo.
+- Precisión total: si dudas, vuelve a revisar. Los totales escritos a mano deben leerse de forma exacta.
 - Diferenciá "9" de "2": el 9 tiene un óvalo superior cerrado; el 2 tiene base plana o curva abierta.
 - Diferenciá "1" de "7": el 7 suele tener un trazo horizontal cruzándolo.
 - Diferenciá "0" de "6": el 0 es un óvalo completo; el 6 tiene un bucle inferior con un trazo ascendente.
+- Conserva valores decimales como "2.5" cuando aparezcan; no los conviertas a enteros.
+
+REGLAS PARA TEXTO Y CÓDIGOS:
+- Respeta los códigos alfanuméricos tal como están escritos ("LM200", "MRZ", "JEG", "ATRIA"). No reemplaces "LM" por "CM" ni insertes espacios dentro de los códigos.
+- Cuando un término aparezca en plural ("CHAPAS"), estandariza a singular ("Chapa") pero conserva la parte distintiva ("Chapa JEG Grande").
+- Evita crear artículos nuevos combinando líneas distintas.
 
 Objetivo de extracción (objeto JSON con { "destination": string|null, "items": [...] }):
-1. destination: identifica el destinatario buscando campos como "Señor(es)", "Destino" u otros equivalentes. Devuelve null si no aparece claramente.
+1. destination: identifica el destinatario buscando campos como "Señor(es)", "Destino" u otros equivalentes. Devuelve null si no aparece claramente. Normaliza espacios extra.
 2. items: recorre el detalle del documento y extrae cada línea como un artículo.
-   - No inventes filas ni combines artículos distintos. Usa el texto exacto del documento y estandariza mayúsculas/plurales.
-   - itemName: describe el artículo con el nombre más específico posible (ej. "Modulo LM200", "Chapa HEX").
-   - quantity: toma el número de la columna de cantidad para esa línea aplicando las reglas de caligrafía.
-   - itemType: asigna "MODULO" si el nombre contiene "Modulo" y "CHAPA" si contiene "Chapa". Si no coincide con ninguna, dedúcelo con cuidado usando el contexto del nombre.
+   - itemName: describe el artículo con el nombre más específico posible usando el texto del documento (ej. "Modulo LM200", "Chapa HEX", "Modulo 43 W (200 LED Cret 52 LED Samsung)").
+   - quantity: toma el número exacto de la columna de cantidad correspondiente a esa línea aplicando las reglas de caligrafía. Respeta números grandes ("160") y valores con decimales ("2.5").
+   - itemType: asigna "MODULO" si el nombre contiene "Modulo" y "CHAPA" si contiene "Chapa". Si no coincide con ninguna, dedúcelo cuidadosamente usando el contexto.
+   - No inventes filas, no combines artículos distintos y no omitas unidades repetidas si están escritas varias veces.
 
-Devuelve únicamente el JSON solicitado. No incluyas explicaciones ni texto fuera del JSON.`,
+Devuelve únicamente el JSON solicitado. No incluyas explicaciones, texto adicional ni comentarios fuera del JSON.`,
     schema: transactionSchema,
   };
 };
