@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ItemType, ScannedTransactionData, ScannedControlSheetData } from '../types';
+import { normalizeItemName } from '../utils/itemNormalization';
 
 const GEMINI_API_KEY =
   import.meta.env.VITE_GEMINI_API_KEY ??
@@ -126,7 +127,15 @@ export const scanDocument = async (imageFile: File): Promise<ScannedTransactionD
     const parsedResult = JSON.parse(jsonString);
     
     if (parsedResult && Array.isArray(parsedResult.items)) {
-        return parsedResult as ScannedTransactionData;
+        const normalized: ScannedTransactionData = {
+          destination: parsedResult.destination ?? null,
+          items: parsedResult.items.map((item: any) => ({
+            itemName: normalizeItemName(item.itemName),
+            quantity: item.quantity,
+            itemType: item.itemType,
+          })),
+        };
+        return normalized;
     }
     return { items: [], destination: null };
 
@@ -184,7 +193,7 @@ export const scanControlSheet = async (imageFile: File): Promise<ScannedControlS
         return (parsedResult as any[]).map(item => ({
             deliveryDate: item.fecha_entrega,
             quantity: item.cantidad_kits,
-            model: item.modelo,
+            model: normalizeItemName(item.modelo),
             destination: item.destino
         }));
     } catch (error) {

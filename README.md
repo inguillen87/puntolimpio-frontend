@@ -15,6 +15,10 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ioutoX5Po34K12pehTbK_k
 
 1. Install dependencies:
    `npm install`
-2. Set the `VITE_GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Configure el proveedor de IA remoto mediante `VITE_AI_PROVIDER` en [.env.local](.env.local). Valores disponibles:
+   - `gemini` (por defecto): requiere `VITE_GEMINI_API_KEY`.
+   - `openai`: requiere `VITE_OPENAI_API_KEY` (y opcionalmente `VITE_OPENAI_MODEL`, por defecto `gpt-4o-mini`).
+   - `none`: deshabilita el LLM y fuerza el modo solo QR/OCR local.
+   El pipeline redimensiona las imágenes a 1024 px, las convierte a WEBP, cachea los resultados por hash y ejecuta QR/Tesseract antes de consumir el LLM.
 3. Run the app:
    `npm run dev`
