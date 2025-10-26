@@ -13,7 +13,6 @@ import Register from './components/Register';
 import QrScanner from './components/QrScanner';
 import AiAssistant from './components/AiAssistant';
 import QrCodeBulkDisplayModal from './components/QrCodeBulkDisplayModal';
-import UsageQuotaBanner from './components/UsageQuotaBanner';
 import { isFirebaseConfigured } from './firebaseConfig';
 import * as db from './services/databaseService';
 import * as mockDb from './services/mockDatabaseService';
@@ -790,8 +789,6 @@ const AppContent: React.FC = () => {
         </div>
       )}
       
-      <UsageQuotaBanner />
-
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {isLoading || activeTab === null ? (
             <div className="flex justify-center items-center h-64"><Spinner /></div>
