@@ -1,0 +1,7 @@
+{
+  "name": "Sistema de Gestión de Inventario - Punto Limpio",
+  "description": "Un sistema profesional de gestión de inventario diseñado para 'Punto Limpio'. Utiliza IA para escanear documentos (facturas, remitos) para automatizar el ingreso de datos de entradas y salidas de stock, calcula los niveles de stock en tiempo real y cuenta con un panel de inventario con buscador.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

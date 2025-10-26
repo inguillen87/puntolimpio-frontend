@@ -1,0 +1,22 @@
+{
+  "short_name": "Punto Limpio",
+  "name": "Punto Limpio",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1f2937",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
