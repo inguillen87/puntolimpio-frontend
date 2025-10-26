@@ -10,6 +10,17 @@ const OPENAI_API_KEY =
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o-mini';
 
+const ASSISTANT_SYSTEM_PROMPT = `
+Eres "Punto Limpio AI", un asistente experto en logística y gestión de inventario. Tu conocimiento se basa ÚNICAMENTE en el contexto de datos JSON proporcionado.
+
+Reglas de interpretación del negocio:
+- Una transacción de tipo "OUTCOME" es una venta, salida o egreso. El "partnerName" asociado a un "OUTCOME" es el cliente.
+- Una transacción de tipo "INCOME" es una compra o ingreso. El "partnerName" asociado a un "INCOME" es el proveedor.
+- Para preguntas sobre "¿a quién vendimos?", busca transacciones "OUTCOME" y reporta el "partnerName".
+- Si no puedes responder con los datos proporcionados, indícalo claramente diciendo "No tengo suficiente información para responder a esa pregunta". No inventes datos.
+
+Responde de forma concisa, profesional y directa. Usa Markdown para listas o tablas cuando ayude a la lectura. Nunca incorpores información externa al contexto JSON.`;
+
 const getAuthorizationHeaders = () => ({
   'Content-Type': 'application/json',
   Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -37,11 +48,11 @@ export const getAiAssistantResponse = async (context: string, question: string):
     messages: [
       {
         role: 'system',
-        content: 'Eres "Punto Limpio AI", un asistente experto en logística. Responde únicamente con la información del JSON proporcionado.',
+        content: ASSISTANT_SYSTEM_PROMPT,
       },
       {
         role: 'user',
-        content: `Contexto JSON:\n${context}\n\nPregunta:\n${question}`,
+        content: `Contexto de Datos (JSON):\n${context}\n\nPregunta del Usuario:\n${question}`,
       },
     ],
   };
@@ -105,12 +116,39 @@ const controlSchema = {
 const buildJsonPrompt = (docType: DocumentType) => {
   if (docType === DocumentType.CONTROL) {
     return {
-      instruction: 'Devuelve únicamente un array JSON válido donde cada elemento representa una fila de la planilla de control.',
+      instruction: `Analiza la planilla de control horizontal. Tu tarea es extraer cada fila válida como un objeto dentro de un array JSON. Presta atención a la caligrafía para interpretar fechas y cantidades.
+
+Para cada fila captura:
+- deliveryDate: fecha en la columna "FECHA ENTREGA" (formato DD/MM o DD/MM/YY).
+- quantity: número en la columna "CANTIDAD KITS".
+- model: texto de la columna "MODELO".
+- destination: texto en la columna "DESTINO" si está presente. Si una fila está vacía pero la anterior tiene destino, reutiliza el mismo valor. Puedes omitir la propiedad si realmente no existe destino.
+
+Reglas adicionales:
+- No omitas filas que tengan modelo y cantidad.
+- Ignora columnas irrelevantes como "REMITO HT", "ENTREGA", "RETIRA", "FIRMA" y "FECHA TERMINADO".
+- Devuelve únicamente un array JSON válido. No incluyas explicaciones ni texto adicional.`,
       schema: controlSchema,
     };
   }
+
   return {
-    instruction: 'Devuelve exclusivamente un objeto JSON con destino y listado de artículos.',
+    instruction: `Analiza con extrema atención el documento adjunto (remito o factura). Presta especial atención a la caligrafía para interpretar correctamente números y texto.
+
+Reglas críticas para números escritos a mano:
+- Un "9" tiene el óvalo superior cerrado. Un "2" tiene una base plana o curva abierta.
+- Un "1" suele ser un trazo vertical. Un "7" normalmente tiene una línea horizontal que lo cruza.
+- Un "0" es un óvalo completo. Un "6" tiene un bucle inferior y un trazo ascendente.
+
+Objetivo de extracción:
+1. destination: identifica el destinatario (campos "Señor(es)", "Destino", etc.). Devuelve null si no está presente.
+2. items: analiza la sección de detalle. Extrae cada línea como un artículo independiente.
+   - No asumas ni inventes artículos. Usa el texto exacto, estandarizando mayúsculas y plurales.
+   - itemName: nombre más específico posible (ej. "Modulo LM200", "Chapa HEX").
+   - quantity: número en la columna de cantidad para esa fila.
+   - itemType: clasifica como "MODULO" si el nombre contiene "Modulo" y "CHAPA" si contiene "Chapa".
+
+Devuelve únicamente un objeto JSON válido con la estructura { "destination": string|null, "items": [...] }. No incluyas explicaciones ni texto fuera del JSON.`,
     schema: transactionSchema,
   };
 };
