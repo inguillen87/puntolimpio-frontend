@@ -116,18 +116,19 @@ const controlSchema = {
 const buildJsonPrompt = (docType: DocumentType) => {
   if (docType === DocumentType.CONTROL) {
     return {
-      instruction: `Analiza con extremo detalle la planilla de control horizontal adjunta. Cada FILA con datos debe convertirse en un objeto dentro de un ARRAY JSON. Lee la caligrafía con atención doble para no perder dígitos ni letras.
+      instruction: `Analiza con extremo detalle la planilla de control horizontal adjunta. Cada FILA con datos debe convertirse en un objeto dentro de un ARRAY JSON. Lee la caligrafía con atención doble para no perder dígitos ni letras y vuelve a repasar los renglones dudosos.
 
 Para cada fila extrae obligatoriamente:
 - deliveryDate: copia exactamente la fecha de la columna "FECHA ENTREGA" (formato DD/MM o DD/MM/YY).
 - quantity: toma el número completo de la columna "CANTIDAD KITS". Si hay espacios entre dígitos ("1 30"), interprétalos como un único número ("130"). Si observas un punto pequeño o una coma entre dígitos altos ("2.50", "5,10") y no hay anotaciones decimales claras, trátalo como parte del entero continuo ("250", "510"). Ignora marcas como tilde, check o comillas que sólo indican repetición.
-- model: transcribe el texto completo de la columna "MODELO" preservando códigos alfanuméricos ("LM200", "MRZ", "JEG", "ATRIA"). No conviertas "LM" en "CM", no cambies "Módulo" por "Modelo" ni agregues espacios internos. Respeta mayúsculas/minúsculas visibles y corrige únicamente errores evidentes de lectura.
+- quantity: antes de continuar con la siguiente fila, confirma si el último dígito es un "0" tenue, un "9" o un "8" repasando el óvalo superior. Si se observan dos óvalos cerrados es un 8; si sólo se cierra el superior y cae un trazo hacia abajo es un 9.
+- model: transcribe el texto completo de la columna "MODELO" preservando códigos alfanuméricos ("LM200", "MRZ", "JEG", "ATRIA"). Une letras y números que pertenezcan a un mismo código ("LM 200" → "LM200", "JC 250" → "JC250"). No conviertas "LM" en "CM", no cambies "Módulo" por "Modelo" ni agregues espacios internos. Respeta mayúsculas/minúsculas visibles y corrige únicamente errores evidentes de lectura.
 - destination: toma el texto de la columna "DESTINO" cuando exista. Si la celda está vacía o contiene símbolos de repetición como comillas dobles (""), "〃" o "--", reutiliza el último destino válido leído anteriormente. Si nunca se declaró un destino, omite la propiedad.
 
 Reglas esenciales:
 - Extrae todas las filas con modelo y cantidad visibles, aunque el destino esté en blanco o tachado.
 - Ignora por completo las columnas "REMITO HT", "ENTREGA", "RETIRA", "FIRMA" y "FECHA TERMINADO".
-- Verifica la longitud de cada número: si la tinta sugiere un cero adicional apagado o trazos superpuestos, inclúyelo para evitar convertir "400" en "40".
+- Verifica la longitud de cada número: si la tinta sugiere un cero adicional apagado o trazos superpuestos, inclúyelo para evitar convertir "400" en "40". Comprueba también que ningún "9" se haya degradado a "8" ni un "6" a "0".
 - Devuelve ÚNICAMENTE un ARRAY JSON válido siguiendo el esquema. No agregues comentarios ni explicaciones.
 - Antes de finalizar, vuelve a revisar cada cantidad y cada código letra por letra para confirmar que no falte ningún dígito ni se haya confundido una letra similar.`,
       schema: controlSchema,
@@ -138,31 +139,32 @@ Reglas esenciales:
     instruction: `Analiza con extrema atención el documento adjunto (puede ser remito, factura, nota de pedido o comprobante similar). Debes leer la caligrafía con precisión quirúrgica para interpretar números y texto.
 
 REGLAS CRÍTICAS PARA NÚMEROS ESCRITOS A MANO:
-- Precisión total: si dudas, vuelve a revisar la casilla completa y compara con otros renglones.
-- Distingue "9" de "2" observando si el óvalo superior está totalmente cerrado (9) o abierto y apoyado en la base (2).
-- Distingue "1" de "7": el 7 tiene un trazo horizontal o una pequeña barra central; el 1 suele ser un solo trazo vertical.
-- Distingue "0" de "6": el 6 tiene un bucle inferior con cola; el 0 es un óvalo completo.
-- Si ves espacios internos ("1 60") o un trazo débil entre dígitos, léelo como un número entero continuo ("160") salvo que haya un separador decimal claro (punto o coma bien marcado) acompañado de decimales pequeños.
-- Cuando la columna es de unidades enteras (chapa, módulo, luminaria) y aparece algo como "2.50" o "5,10", revísalo como posible entero "250" o "510"; los puntos/ comas intermedios suelen ser parte del trazo del cero. Solo conserva decimales si el documento explícitamente usa fracciones (kg, metros, litros).
-- Vigila ceros finales apagados o atravesados por tildes: confirma si el número es "400" y no "40".
-- Ignora marcas de verificación, tildes o anotaciones que no formen parte del número.
+- Precisión total: si dudas, vuelve a revisar la casilla completa y compara con otros renglones de la misma columna.
+- Diferencia "9" de "8": el 9 tiene un óvalo superior cerrado con un trazo descendente; el 8 muestra dos óvalos bien definidos. Si el aro superior se cierra, cuenta como 9.
+- Diferencia "9" de "2": el 9 tiene el óvalo superior cerrado; el 2 termina en base plana o curva abierta.
+- Distingue "1" de "7": el 7 suele tener una barra horizontal o un trazo medio; el 1 es un trazo vertical limpio.
+- Distingue "0" de "6": el 6 tiene un bucle inferior con cola; el 0 es un óvalo completo y uniforme.
+- Si ves espacios internos ("1 60") o un trazo débil entre dígitos, léelo como un número entero continuo ("160") salvo que haya un separador decimal claro (punto o coma bien marcado) acompañado de decimales pequeños en una columna que acepte fracciones.
+- Cuando la columna representa unidades enteras (chapa, módulo, luminaria) y aparece algo como "2.50", "5,10" o "51,0", revísalo como posible entero "250", "510" o "510" respectivamente: los puntos o comas intermedios suelen ser parte de trazos del cero.
+- Vigila ceros finales apagados o atravesados por tildes: confirma si el número es "400" y no "40". No inventes decimales en cantidades de unidades.
+- Ignora marcas de verificación, tildes o anotaciones que no formen parte del número y asegúrate de leer la columna completa fila por fila.
 
 REGLAS PARA TEXTO Y CÓDIGOS:
 - Respeta los códigos alfanuméricos exactamente como aparecen ("LM200", "MRZ", "JEG", "ATRIA", "HEX"). No sustituyas letras, no agregues espacios y no cambies mayúsculas/minúsculas cuando estén claras.
+- Si un código se escribe separado por espacio o con puntos ("JC 2.50", "LM 200"), devuélvelo unido sin separadores ("JC250", "LM200").
 - Cuando un término esté en plural ("CHAPAS"), estandariza a singular ("Chapa") pero conserva el resto del nombre. Mantén palabras como "Reconstruidos", "Garantía", "HEX".
-- No combines descripciones de líneas diferentes ni inventes artículos ausentes. Cada renglón del detalle debe generar un item independiente.
-- Mantén el orden original de las líneas para que la lectura coincida con el documento.
+- No combines descripciones de líneas diferentes ni inventes artículos ausentes. Cada renglón del detalle debe generar un item independiente en el mismo orden.
 - Si la palabra escrita es "Módulo", transcribe "Módulo" o "Modulo" según aparezca. No lo reemplaces por "Modelo" salvo que el texto diga claramente "Modelo".
 
 OBJETIVO (estructura JSON { "destination": string|null, "items": [...] }):
-1. destination: identifica el destinatario en campos como "Señor(es)", "Cliente", "Destino" o similares. Prefiere el texto impreso en el formulario (por ejemplo "Municipalidad de Las Heras") antes que interpretaciones dudosas. Limpia espacios extra. Si no existe un destino claro, devuelve null.
+1. destination: identifica el destinatario en campos como "Señor(es)", "Cliente", "Destino" o similares. Prefiere el texto impreso en el formulario (por ejemplo "Municipalidad de Las Heras") antes que interpretaciones dudosas y corrige errores evidentes de lectura.
 2. items: recorre toda la sección de detalle y extrae cada renglón escrito.
    - itemName: utiliza el texto más específico posible del renglón, conservando números de potencia, material y aclaraciones entre paréntesis.
-   - quantity: registra el número exacto de la columna de cantidad correspondiente a ese renglón, después de verificarlo con las reglas anteriores. Si el documento repite la misma descripción con cantidades distintas, mantén cada línea.
+   - quantity: registra el número exacto de la columna de cantidad correspondiente a ese renglón, después de verificarlo con las reglas anteriores. Cada fila debe conservar su cantidad original, aunque parezca repetida.
    - itemType: asigna "MODULO" cuando el nombre contenga "Modulo"/"Módulo" y "CHAPA" cuando contenga "Chapa". Si no hay ninguna palabra clave, determina el tipo con el contexto (por ejemplo "Luminaria" suele ser "MODULO").
    - No omitas unidades repetidas, no conviertas dos líneas en una sola y no cambies el tipo cuando el nombre ya lo indica.
 
-Antes de devolver la respuesta, haz una última lectura de cada destino y cada artículo para confirmar que las letras y números coinciden exactamente con el documento.
+Antes de devolver la respuesta, haz una última lectura de cada destino y cada artículo para confirmar que las letras y números coinciden exactamente con el documento, especialmente en ceros finales y códigos como "LM200" o "JC250".
 
 Devuelve exclusivamente el JSON solicitado siguiendo el esquema indicado, sin comentarios ni texto adicional.`,
     schema: transactionSchema,
