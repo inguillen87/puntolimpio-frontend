@@ -61,6 +61,13 @@ const configuredProviders: RemoteAiProvider[] = sortByDefaultPriority(
   })
 );
 
+if (!remoteDisabled) {
+  const preferredLabel = preferredRemoteProviders.map(provider => PROVIDER_LABELS[provider]).join(' → ');
+  const configuredLabel = configuredProviders.map(provider => PROVIDER_LABELS[provider]).join(' → ');
+  console.info('[AI Service] Preferencia declarada de proveedores remotos:', preferredLabel || '—');
+  console.info('[AI Service] Proveedores configurados detectados:', configuredLabel || '—');
+}
+
 let lastSuccessfulProvider: RemoteAiProvider | null = configuredProviders[0] ?? null;
 
 export const getActiveProvider = (): AiProviderName => {
@@ -85,9 +92,11 @@ const runWithProviders = async <T>(executor: (provider: RemoteAiProvider) => Pro
 
   const errors: string[] = [];
   for (const provider of configuredProviders) {
+    console.info(`[AI Service] Intentando proveedor ${PROVIDER_LABELS[provider]} (${provider})`);
     try {
       const result = await executor(provider);
       lastSuccessfulProvider = provider;
+      console.info(`[AI Service] Proveedor ${PROVIDER_LABELS[provider]} respondió correctamente`);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

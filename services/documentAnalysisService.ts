@@ -200,6 +200,7 @@ export const analyzeDocument = async (
   }
 
   if (options.allowRemote && isRemoteProviderConfigured()) {
+    console.info('[DocumentAnalysis] Iniciando análisis remoto con', getProviderLabel());
     try {
       if (docType === DocumentType.CONTROL) {
         const remoteRows = normalizeControlRows(await scanControlSheetRemote(processedFile));
@@ -217,7 +218,7 @@ export const analyzeDocument = async (
         }
       }
     } catch (error: any) {
-      console.error('Fallo el análisis remoto', error);
+      console.error('[DocumentAnalysis] Falló el análisis remoto', error);
       remoteError = error instanceof Error ? error : new Error(String(error));
     }
   }
