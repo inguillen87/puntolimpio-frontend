@@ -178,6 +178,11 @@ const requestVisionJson = async <T>(file: File, prompt: string, schema: any): Pr
     ],
   };
 
+  console.info('[OpenAI Vision] Enviando solicitud', {
+    model: OPENAI_MODEL,
+    schemaName: schema?.name ?? 'desconocido',
+  });
+
   const response = await fetch(OPENAI_CHAT_URL, {
     method: 'POST',
     headers: getAuthorizationHeaders(),
@@ -192,7 +197,19 @@ const requestVisionJson = async <T>(file: File, prompt: string, schema: any): Pr
   const data = await response.json();
   const message = data?.choices?.[0]?.message;
   const raw = parseMessageContent(message);
-  return raw ? JSON.parse(raw) as T : ({} as T);
+
+  if (!raw) {
+    throw new Error('OpenAI vision devolvió una respuesta vacía.');
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as T;
+    console.info('[OpenAI Vision] Respuesta JSON recibida', raw.slice(0, 500));
+    return parsed;
+  } catch (error) {
+    console.error('[OpenAI Vision] Error al parsear JSON', { error, raw });
+    throw new Error(`OpenAI vision devolvió JSON inválido: ${(error as Error).message}`);
+  }
 };
 
 export const scanDocument = async (file: File): Promise<ScannedTransactionData> => {
