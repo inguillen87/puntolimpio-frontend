@@ -10,7 +10,7 @@ const PROVIDER_LABELS: Record<RemoteAiProvider, string> = {
   openai: 'OpenAI',
 };
 
-const DEFAULT_PRIORITY: RemoteAiProvider[] = ['openai', 'gemini'];
+const DEFAULT_PRIORITY: RemoteAiProvider[] = ['gemini', 'openai'];
 
 const sortByDefaultPriority = (providers: RemoteAiProvider[]): RemoteAiProvider[] => {
   const priority = new Map(DEFAULT_PRIORITY.map((provider, index) => [provider, index]));
@@ -22,7 +22,7 @@ type ProviderPreference = AiProviderName[];
 const parseProviderPreference = (): ProviderPreference => {
   const rawPreference = (import.meta.env.VITE_AI_PROVIDER ??
     (typeof process !== 'undefined' ? process.env.AI_PROVIDER : undefined) ??
-    'openai,gemini'
+    'gemini,openai'
   ).toString();
 
   const tokens = rawPreference
@@ -31,7 +31,7 @@ const parseProviderPreference = (): ProviderPreference => {
     .filter(Boolean) as AiProviderName[];
 
   if (tokens.length === 0) {
-    return ['openai', 'gemini'];
+    return ['gemini', 'openai'];
   }
 
   const seen = new Set<AiProviderName>();
@@ -44,7 +44,7 @@ const parseProviderPreference = (): ProviderPreference => {
     }
   }
 
-  return preference.length > 0 ? preference : ['openai', 'gemini'];
+  return preference.length > 0 ? preference : ['gemini', 'openai'];
 };
 
 const providerPreference = parseProviderPreference();
