@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { scanDocument, scanControlSheet } from '../services/geminiService';
+import { scanDocument, scanControlSheet, isGeminiConfigured } from '../services/geminiService';
 import { ScannedItem, DocumentType, ScannedControlSheetData, ScannedTransactionData, Location } from '../types';
 import { useUsageLimits } from '../context/UsageLimitsContext';
 import Spinner from './Spinner';
@@ -83,6 +83,12 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
 
   const startScan = useCallback(async (fileToScan: File) => {
     if (!fileToScan) return;
+    if (!isGeminiConfigured) {
+      setError('La integración con Gemini no está configurada. Agrega la clave VITE_GEMINI_API_KEY para habilitar el escaneo automático.');
+      setScannedData(null);
+      setPreview(null);
+      return;
+    }
     if (!canUseRemoteAnalysis('document')) {
       const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
       const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';

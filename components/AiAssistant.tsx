@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Item, Transaction, Partner, TransactionType } from '../types';
-import { getAiAssistantResponse } from '../services/geminiService';
+import { getAiAssistantResponse, isGeminiConfigured } from '../services/geminiService';
 import Spinner from './Spinner';
 import { useUsageLimits } from '../context/UsageLimitsContext';
 
@@ -22,6 +22,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
+  const aiAvailable = isGeminiConfigured;
 
   const inventoryContext = useMemo(() => {
     const stockMap = new Map<string, number>();
@@ -65,6 +66,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
     const newMessages: Message[] = [...messages, { sender: 'user', text: userInput }];
     setMessages(newMessages);
     setUserInput('');
+    if (!aiAvailable) {
+        setMessages([
+            ...newMessages,
+            { sender: 'ai', text: 'La integración con Gemini no está configurada. Agrega la variable VITE_GEMINI_API_KEY para habilitar el asistente.' },
+        ]);
+        return;
+    }
     if (!canUseRemoteAnalysis('assistant')) {
         const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
         const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
@@ -119,10 +127,14 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
                             <li>¿Qué artículos tienen stock bajo?</li>
                         </ul>
                     </div>
-                    {!canUseRemoteAnalysis('assistant') && (
+                    {(!aiAvailable || !canUseRemoteAnalysis('assistant')) && (
                         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-900/30 dark:text-red-200">
                             <p className="font-semibold">Modo degradado</p>
-                            <p className="text-xs mt-1">La cuota remota está agotada. Usa el QR y la carga manual hasta el próximo reinicio o solicita un upgrade.</p>
+                            <p className="text-xs mt-1">
+                                {!aiAvailable
+                                    ? 'La integración con Gemini no está configurada. Agrega la clave VITE_GEMINI_API_KEY para habilitar el asistente.'
+                                    : 'La cuota remota está agotada. Usa el QR y la carga manual hasta el próximo reinicio o solicita un upgrade.'}
+                            </p>
                         </div>
                     )}
                     {messages.map((msg, index) => (
@@ -150,9 +162,9 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
                             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                             placeholder="Escribe tu pregunta..."
                             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            disabled={isLoading}
+                            disabled={isLoading || !aiAvailable}
                         />
-                        <button onClick={handleSend} disabled={isLoading || !userInput.trim()} className="bg-blue-600 text-white rounded-lg p-3 disabled:bg-blue-400">
+                        <button onClick={handleSend} disabled={isLoading || !userInput.trim() || !aiAvailable} className="bg-blue-600 text-white rounded-lg p-3 disabled:bg-blue-400">
                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
                         </button>
                     </div>
