@@ -21,9 +21,22 @@ export const uploadFile = async (file: File, path: string): Promise<string> => {
 
 const initializeMockData = () => {
     if (!localStorage.getItem(ORGANIZATIONS_KEY)) {
-        const mockOrgs = [
-            { id: 'org-admin-platform', name: 'Plataforma de Administración' },
-            { id: 'org-1', name: 'Punto Limpio Junín (Demo)' },
+        const mockOrgs: Organization[] = [
+            {
+                id: 'org-admin-platform',
+                name: 'Plataforma de Administración',
+                usagePlan: { planName: 'Administración', monthlyQuota: 0 },
+            },
+            {
+                id: 'org-1',
+                name: 'Punto Limpio Junín (Demo)',
+                usagePlan: {
+                    planName: 'Plan Demo 1K',
+                    monthlyQuota: 1000,
+                    dailyQuota: 200,
+                    perMinuteQuota: 20,
+                },
+            },
         ];
         localStorage.setItem(ORGANIZATIONS_KEY, JSON.stringify(mockOrgs));
         
@@ -182,7 +195,16 @@ export const getOrganization = async(organizationId: string): Promise<Organizati
 
 export const setupNewOrganization = async (orgName: string, adminEmail: string): Promise<void> => {
     const orgs = await getData<Organization>(ORGANIZATIONS_KEY);
-    const newOrg = { name: orgName, id: `org-${Date.now()}` };
+    const newOrg: Organization = {
+        name: orgName,
+        id: `org-${Date.now()}`,
+        usagePlan: {
+            planName: 'Plan Base 500',
+            monthlyQuota: 500,
+            dailyQuota: 100,
+            perMinuteQuota: 10,
+        }
+    };
     await saveData(ORGANIZATIONS_KEY, [...orgs, newOrg]);
     await inviteUserToOrganization(newOrg.id, adminEmail, UserRole.ORG_ADMIN);
 }

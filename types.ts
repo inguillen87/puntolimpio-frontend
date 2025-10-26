@@ -6,6 +6,7 @@ export interface Organization {
   itemCount?: number;
   iaScans30d?: number;
   transactions30d?: number;
+  usagePlan?: UsagePlanSeed;
 }
 
 export enum UserRole {
@@ -181,4 +182,33 @@ export interface GlobalStats {
 export interface DailyUsage {
     date: string;
     count: number;
+}
+
+export interface UsageCounters {
+    documentScans: number;
+    assistantSessions: number;
+}
+
+export interface UsagePlanSeed {
+    planName?: string;
+    monthlyQuota?: number;
+    dailyQuota?: number;
+    perMinuteQuota?: number;
+    resetsOn?: string;
+}
+
+export interface UsageLimitsState {
+    organizationId: string;
+    planName: string;
+    monthlyQuota: number;
+    dailyQuota?: number;
+    perMinuteQuota?: number;
+    used: number;
+    remaining: number;
+    resetsOn: string;
+    degradeMode: boolean;
+    degradeReason?: string;
+    lastUpdated: string;
+    counters: UsageCounters;
+    upgradeRequestedAt?: string;
 }

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { scanDocument, scanControlSheet } from '../services/geminiService';
 import { ScannedItem, DocumentType, ScannedControlSheetData, ScannedTransactionData, Location } from '../types';
+import { useUsageLimits } from '../context/UsageLimitsContext';
 import Spinner from './Spinner';
 
 interface ScanDocumentProps {
@@ -62,6 +63,7 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
   const [documentType, setDocumentType] = useState<DocumentType>(DocumentType.INCOME);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -81,6 +83,14 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
 
   const startScan = useCallback(async (fileToScan: File) => {
     if (!fileToScan) return;
+    if (!canUseRemoteAnalysis('document')) {
+      const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
+      const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
+      setError(`${reason} Usa el registro manual o el escaneo QR hasta el reinicio (${resetMessage}).`);
+      setScannedData(null);
+      setPreview(null);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     setScannedData(null);
@@ -99,13 +109,14 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
         result = await scanDocument(compressedFile);
         if (result.items.length === 0) setError('La IA no pudo detectar ningún artículo en el documento. Por favor, intenta con una imagen más clara.');
       }
+      recordRemoteUsage('document');
       setScannedData(result);
     } catch (err: any) {
       setError(err.message || 'Ocurrió un error desconocido.');
     } finally {
       setIsLoading(false);
     }
-  }, [documentType]);
+  }, [documentType, canUseRemoteAnalysis, usageState, recordRemoteUsage]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];

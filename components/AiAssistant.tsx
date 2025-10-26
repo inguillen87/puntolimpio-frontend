@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Item, Transaction, Partner, TransactionType } from '../types';
 import { getAiAssistantResponse } from '../services/geminiService';
 import Spinner from './Spinner';
+import { useUsageLimits } from '../context/UsageLimitsContext';
 
 interface AiAssistantProps {
   items: Item[];
@@ -20,6 +21,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
 
   const inventoryContext = useMemo(() => {
     const stockMap = new Map<string, number>();
@@ -63,10 +65,21 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
     const newMessages: Message[] = [...messages, { sender: 'user', text: userInput }];
     setMessages(newMessages);
     setUserInput('');
+    if (!canUseRemoteAnalysis('assistant')) {
+        const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
+        const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
+        setMessages([
+            ...newMessages,
+            { sender: 'ai', text: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).` }
+        ]);
+        return;
+    }
+
     setIsLoading(true);
 
     try {
         const aiResponse = await getAiAssistantResponse(inventoryContext, userInput);
+        recordRemoteUsage('assistant');
         setMessages([...newMessages, { sender: 'ai', text: aiResponse }]);
     } catch (error) {
         console.error("AI Assistant error:", error);
@@ -106,6 +119,12 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
                             <li>¿Qué artículos tienen stock bajo?</li>
                         </ul>
                     </div>
+                    {!canUseRemoteAnalysis('assistant') && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-900/30 dark:text-red-200">
+                            <p className="font-semibold">Modo degradado</p>
+                            <p className="text-xs mt-1">La cuota remota está agotada. Usa el QR y la carga manual hasta el próximo reinicio o solicita un upgrade.</p>
+                        </div>
+                    )}
                     {messages.map((msg, index) => (
                         <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-md p-3 rounded-2xl ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none'}`}>
