@@ -10,6 +10,13 @@ const PROVIDER_LABELS: Record<RemoteAiProvider, string> = {
   openai: 'OpenAI',
 };
 
+const DEFAULT_PRIORITY: RemoteAiProvider[] = ['openai', 'gemini'];
+
+const sortByDefaultPriority = (providers: RemoteAiProvider[]): RemoteAiProvider[] => {
+  const priority = new Map(DEFAULT_PRIORITY.map((provider, index) => [provider, index]));
+  return [...providers].sort((a, b) => (priority.get(a) ?? 0) - (priority.get(b) ?? 0));
+};
+
 type ProviderPreference = AiProviderName[];
 
 const parseProviderPreference = (): ProviderPreference => {
@@ -43,14 +50,16 @@ const parseProviderPreference = (): ProviderPreference => {
 const providerPreference = parseProviderPreference();
 const remoteDisabled = providerPreference.length === 1 && providerPreference[0] === 'none';
 
-const preferredRemoteProviders = providerPreference.filter(
-  (provider): provider is RemoteAiProvider => provider !== 'none'
+const preferredRemoteProviders = sortByDefaultPriority(
+  providerPreference.filter((provider): provider is RemoteAiProvider => provider !== 'none')
 );
 
-const configuredProviders: RemoteAiProvider[] = preferredRemoteProviders.filter(provider => {
-  if (provider === 'openai') return openai.isOpenAiConfigured;
-  return gemini.isGeminiConfigured;
-});
+const configuredProviders: RemoteAiProvider[] = sortByDefaultPriority(
+  preferredRemoteProviders.filter(provider => {
+    if (provider === 'openai') return openai.isOpenAiConfigured;
+    return gemini.isGeminiConfigured;
+  })
+);
 
 let lastSuccessfulProvider: RemoteAiProvider | null = configuredProviders[0] ?? null;
 
