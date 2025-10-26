@@ -1,45 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png" />
+    <link rel="icon" type="image/png" href="/icon512.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
+
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#1f2937" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png">
+    <link rel="apple-touch-icon" href="/icon512.png" />
 
     <title>Punto Limpio</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    
-  <script type="importmap">
-{
-  "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.26.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/",
-    "jspdf": "https://aistudiocdn.com/jspdf@^2.5.1",
-    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^3.8.2",
-    "@zxing/browser": "https://aistudiocdn.com/@zxing/browser@^0.1.5",
-    "qrcode": "https://aistudiocdn.com/qrcode@^1.5.3"
-  }
-}
-</script>
-  <script>
-    // Configura Tailwind para usar el modo oscuro basado en la clase 'dark' en el elemento <html>
-    tailwind.config = {
-      darkMode: 'class',
-    }
-  </script>
-<link rel="stylesheet" href="/index.css">
-</head>
+  </head>
   <body class="bg-gray-100 dark:bg-gray-900">
     <div id="root"></div>
-    <script type="module" src="./index.js"></script>
-  <script type="module" src="/index.tsx"></script>
-</body>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>

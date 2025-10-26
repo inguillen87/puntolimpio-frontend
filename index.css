@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-gray-100 text-gray-900 antialiased;
+  }
+
+  body.dark {
+    @apply bg-gray-900 text-gray-100;
+  }
+}

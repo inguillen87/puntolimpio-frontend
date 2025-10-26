@@ -1,13 +1,27 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ScannedItem, ItemType, ScannedTransactionData, ScannedControlSheetData } from '../types';
+import { ItemType, ScannedTransactionData, ScannedControlSheetData } from '../types';
 
-const API_KEY = process.env.API_KEY;
+const GEMINI_API_KEY =
+  import.meta.env.VITE_GEMINI_API_KEY ??
+  // Support existing build-time replacement
+  (process.env.GEMINI_API_KEY as string | undefined) ??
+  '';
 
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
+export const isGeminiConfigured = Boolean(GEMINI_API_KEY);
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+let aiClient: GoogleGenAI | null = null;
+
+const getClient = () => {
+  if (!isGeminiConfigured) {
+    throw new Error('La clave de la API de Gemini no está configurada.');
+  }
+
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  }
+
+  return aiClient;
+};
 
 const fileToGenerativePart = async (file: File) => {
   const base64EncodedDataPromise = new Promise<string>((resolve) => {
@@ -38,6 +52,7 @@ export const getAiAssistantResponse = async (context: string, question: string):
         ${question}
     `;
     try {
+        const ai = getClient();
         const response = await ai.models.generateContent({
             model: model,
             contents: prompt,
@@ -75,6 +90,7 @@ export const scanDocument = async (imageFile: File): Promise<ScannedTransactionD
   `;
 
   try {
+    const ai = getClient();
     const result = await ai.models.generateContent({
         model: model,
         contents: { parts: [{ text: prompt }, imagePart] },
@@ -140,6 +156,7 @@ export const scanControlSheet = async (imageFile: File): Promise<ScannedControlS
     `;
 
     try {
+        const ai = getClient();
         const result = await ai.models.generateContent({
             model: model,
             contents: { parts: [{ text: prompt }, imagePart] },
