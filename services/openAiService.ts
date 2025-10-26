@@ -171,8 +171,16 @@ const requestVisionJson = async <T>(file: File, prompt: string, schema: any): Pr
       {
         role: 'user',
         content: [
-          { type: 'input_text', text: 'Analiza el documento y responde siguiendo el formato JSON solicitado.' },
-          { type: 'input_image', image_url: imageUrl },
+          {
+            type: 'text',
+            text: 'Analiza el documento y responde siguiendo el formato JSON solicitado.',
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: imageUrl,
+            },
+          },
         ],
       },
     ],
