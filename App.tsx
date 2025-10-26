@@ -20,6 +20,7 @@ import * as authService from './services/authService';
 import { generateInventoryReport, generateAnalyticsReport } from './services/pdfService';
 import Spinner from './components/Spinner';
 import { UsageLimitsProvider, useUsageLimits } from './context/UsageLimitsContext';
+import { normalizeItemName, canonicalItemKey, normalizePartnerName } from './utils/itemNormalization';
 
 const databaseService = isFirebaseConfigured ? db : mockDb;
 
@@ -133,17 +134,17 @@ const AppContent: React.FC = () => {
 
       // Retroactively build partner list from all transactions to ensure complete data
       const partnerMap = new Map<string, Partner>();
-      dbPartners.forEach(p => partnerMap.set(p.name.toLowerCase(), p));
+      dbPartners.forEach(p => partnerMap.set(normalizePartnerName(p.name).toLowerCase(), p));
 
       loadedTransactions.forEach(tx => {
         if (tx.destination && !tx.partnerId) {
-          const cleanName = tx.destination.trim();
-          const lowerCaseName = cleanName.toLowerCase();
-          
+          const cleanName = normalizePartnerName(tx.destination);
+          const partnerKey = cleanName.toLowerCase();
+
           if (cleanName) {
-            const existingPartner = partnerMap.get(lowerCaseName);
+            const existingPartner = partnerMap.get(partnerKey);
             if (!existingPartner) {
-               partnerMap.set(lowerCaseName, {
+               partnerMap.set(partnerKey, {
                 id: `implicit-${cleanName.replace(/\s+/g, '-')}`,
                 organizationId: organizationId,
                 name: cleanName,
@@ -347,9 +348,10 @@ const AppContent: React.FC = () => {
         for (const sheet of scannedSheets) {
             let partnerId: string | undefined = undefined;
             if (sheet.destination) {
-                const cleanPartnerName = sheet.destination.trim();
+                const normalizedPartner = normalizePartnerName(sheet.destination);
+                const partnerKey = normalizedPartner.toLowerCase();
                 const allPartners = [...partners, ...newPartners];
-                const existingPartner = allPartners.find(p => p.name.toLowerCase() === cleanPartnerName.toLowerCase());
+                const existingPartner = allPartners.find(p => normalizePartnerName(p.name).toLowerCase() === partnerKey);
 
                 if (existingPartner) {
                     partnerId = existingPartner.id;
@@ -357,14 +359,16 @@ const AppContent: React.FC = () => {
                         await handleUpdatePartner(existingPartner.id, { isCustomer: true });
                     }
                 } else {
-                    const partnerData = { name: cleanPartnerName, isCustomer: true, isSupplier: false };
+                    const partnerData = { name: normalizedPartner, isCustomer: true, isSupplier: false };
                     const newPartner = await handleAddPartner(partnerData);
                     newPartners.push(newPartner);
                     partnerId = newPartner.id;
                 }
             }
-            
-            const item = items.find(i => i.name.trim().toLowerCase() === sheet.model.trim().toLowerCase());
+
+            const normalizedModel = normalizeItemName(sheet.model);
+            const modelKey = canonicalItemKey(normalizedModel);
+            const item = items.find(i => canonicalItemKey(i.name) === modelKey);
 
             if (item) {
                 const newTransactionData: Omit<Transaction, 'id' | 'organizationId'> = {
@@ -380,7 +384,7 @@ const AppContent: React.FC = () => {
                 };
                 newTransactionsToSave.push(newTransactionData);
             } else {
-                notFoundItems.push(sheet.model);
+                notFoundItems.push(normalizedModel);
             }
         }
 
@@ -412,13 +416,14 @@ const AppContent: React.FC = () => {
         setActiveTab('analytics'); // Go to analytics to see the changes
     } else {
         const { items: transactionItems, destination: destinationFromScan } = scannedData as ScannedTransactionData;
-        const partnerName = newPartnerName || destinationFromScan;
-        
+        const partnerName = newPartnerName || destinationFromScan || undefined;
+
         let partnerId: string | undefined = partnerIdFromManual;
 
         if (!partnerId && partnerName) {
-            const cleanPartnerName = partnerName.trim();
-            const existingPartner = partners.find(p => p.name.toLowerCase() === cleanPartnerName.toLowerCase());
+            const normalizedPartner = normalizePartnerName(partnerName);
+            const partnerKey = normalizedPartner.toLowerCase();
+            const existingPartner = partners.find(p => normalizePartnerName(p.name).toLowerCase() === partnerKey);
             const isIncome = type === DocumentType.INCOME;
 
             if (existingPartner) {
@@ -430,27 +435,29 @@ const AppContent: React.FC = () => {
                 }
             } else {
                 const partnerData = {
-                    name: cleanPartnerName,
+                    name: normalizedPartner,
                     isSupplier: isIncome,
                     isCustomer: !isIncome,
                 };
                 const newPartner = await handleAddPartner(partnerData);
                 partnerId = newPartner.id;
-                showNotification(`Nuevo socio logístico "${cleanPartnerName}" creado.`, false);
+                showNotification(`Nuevo socio logístico "${normalizedPartner}" creado.`, false);
             }
         }
 
         const newItemsToSave: Item[] = [];
         const newTransactionsToSave: Omit<Transaction, 'id' | 'organizationId'>[] = [];
         const currentItemsLookup = [...items];
-        
+
         for (const scannedItem of transactionItems) {
-            let item = currentItemsLookup.find(i => i.name.toLowerCase() === scannedItem.itemName.toLowerCase());
+            const normalizedName = normalizeItemName(scannedItem.itemName);
+            const itemKey = canonicalItemKey(normalizedName);
+            let item = currentItemsLookup.find(i => canonicalItemKey(i.name) === itemKey);
             if (!item) {
                 const newItemData: Item = {
                     id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     organizationId: orgId,
-                    name: scannedItem.itemName,
+                    name: normalizedName,
                     type: scannedItem.itemType,
                     cost: scannedItem.cost,
                     size: scannedItem.size,
@@ -470,7 +477,7 @@ const AppContent: React.FC = () => {
                 locationId: locationId,
                 imageUrl: documentUrl || undefined,
                 partnerId: partnerId,
-                destination: partnerId ? undefined : partnerName || undefined,
+                destination: partnerId ? undefined : partnerName ? normalizePartnerName(partnerName) : undefined,
             };
             newTransactionsToSave.push(newTransactionData);
         }
@@ -795,7 +802,7 @@ const AppContent: React.FC = () => {
         ) : (
             <>
                 {activeTab === 'dashboard' && <Dashboard items={items} transactions={filteredData.visibleTransactions} locations={locations} partners={partners} isLoading={isLoading} onExport={handleExportInventory} onUpdateItem={handleUpdateItem}/>}
-                {activeTab === 'analytics' && <Analytics items={items} transactions={filteredData.visibleTransactions} controlRecords={filteredData.visibleControlRecords} isLoading={isLoading} theme={theme} onExport={(data) => handleExportAnalytics(data as AnalyticsData)} />}
+                {activeTab === 'analytics' && <Analytics items={items} transactions={filteredData.visibleTransactions} controlRecords={filteredData.visibleControlRecords} partners={partners} isLoading={isLoading} theme={theme} onExport={(data) => handleExportAnalytics(data as AnalyticsData)} />}
                 {activeTab === 'scan' && <ScanDocument onConfirmUpload={handleConfirmUpload} locations={locations} />}
                 {activeTab === 'qrscan' && <QrScanner items={items} onConfirmTransaction={handleConfirmManualTransaction} locations={locations} partners={partners} selectedLocationId={selectedLocation === 'ALL' && locations.length > 0 ? locations[0].id : selectedLocation} />}
                 {activeTab === 'manual' && <ManualEntry items={items} locations={locations} partners={partners} onConfirmTransaction={handleConfirmManualTransaction} onDeleteAllData={requestDeleteAllData} />}

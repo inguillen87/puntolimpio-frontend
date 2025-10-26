@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import * as echarts from 'echarts';
-import { Item, Transaction, AnalyticsData, TransactionType, ItemType, ControlRecord, ItemSize } from '../types';
+import { Item, Transaction, AnalyticsData, TransactionType, ItemType, ControlRecord, ItemSize, Partner } from '../types';
+import { normalizePartnerName } from '../utils/itemNormalization';
 
 // --- Configuration Constants ---
 const CHAPA_ESTIMATED_VALUE = 25; 
@@ -10,7 +11,7 @@ const SAFETY_STOCK_DAYS = 3;
 const STOCK_FLOW_DAYS = 30; // Analyze flow for the last 30 days
 
 
-const calculateAnalytics = (items: Item[], transactions: Transaction[], controlRecords: ControlRecord[]): AnalyticsData => {
+const calculateAnalytics = (items: Item[], transactions: Transaction[], controlRecords: ControlRecord[], partners: Partner[]): AnalyticsData => {
     if (items.length === 0) return {} as AnalyticsData;
 
     const stockMap = new Map<string, number>();
@@ -112,17 +113,28 @@ const calculateAnalytics = (items: Item[], transactions: Transaction[], controlR
         stockFlow.push({ date: date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }), income, outcome });
     }
 
-    const topDestinationsByVolume = Object.entries(
-        transactions
-            .filter(tx => tx.type === 'OUTCOME' && tx.destination)
-            .reduce((acc, tx) => {
-                acc[tx.destination!] = (acc[tx.destination!] || 0) + tx.quantity;
+    const partnerLookup = new Map(partners.map(p => [p.id, p.name]));
+
+    const topDestinationsAccumulator = transactions
+        .filter(tx => tx.type === 'OUTCOME')
+        .reduce((acc, tx) => {
+            const partnerName = tx.partnerId ? partnerLookup.get(tx.partnerId) : undefined;
+            const destinationName = partnerName || tx.destination;
+            if (!destinationName) {
                 return acc;
-            }, {} as {[key: string]: number})
-    )
-    .map(([destination, quantity]) => ({ destination, quantity }))
-    .sort((a,b) => b.quantity - a.quantity)
-    .slice(0, 5);
+            }
+            const normalizedDestination = normalizePartnerName(destinationName);
+            const key = normalizedDestination.toLowerCase();
+            if (!acc[key]) {
+                acc[key] = { destination: normalizedDestination, quantity: 0 };
+            }
+            acc[key].quantity += tx.quantity;
+            return acc;
+        }, {} as Record<string, { destination: string; quantity: number }>);
+
+    const topDestinationsByVolume = Object.values(topDestinationsAccumulator)
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 5);
     
     const stockByType = items.reduce((acc, item) => {
         const stock = stockMap.get(item.id) || 0;
@@ -201,13 +213,14 @@ interface AnalyticsProps {
     items: Item[];
     transactions: Transaction[];
     controlRecords: ControlRecord[];
+    partners: Partner[];
     isLoading: boolean;
     theme: 'light' | 'dark';
     onExport: (data: AnalyticsData) => void;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecords, isLoading, theme, onExport }) => {
-    const data = useMemo(() => calculateAnalytics(items, transactions, controlRecords), [items, transactions, controlRecords]);
+const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecords, partners, isLoading, theme, onExport }) => {
+    const data = useMemo(() => calculateAnalytics(items, transactions, controlRecords, partners), [items, transactions, controlRecords, partners]);
     
     const stockFlowChartRef = useRef<HTMLDivElement>(null);
     const stockByTypeChartRef = useRef<HTMLDivElement>(null);

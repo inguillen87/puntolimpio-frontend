@@ -17,7 +17,8 @@
     "jspdf-autotable": "^3.8.2",
     "@zxing/browser": "^0.1.5",
     "qrcode": "^1.5.3",
-    "echarts": "^5.5.1"
+    "echarts": "^5.5.1",
+    "tesseract.js": "^5.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

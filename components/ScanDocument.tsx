@@ -1,5 +1,7 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { scanDocument, scanControlSheet, isGeminiConfigured } from '../services/geminiService';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { analyzeDocument } from '../services/documentAnalysisService';
+import { AnalysisSource } from '../services/scanCacheService';
+import { getProviderLabel, isRemoteProviderConfigured } from '../services/aiService';
 import { ScannedItem, DocumentType, ScannedControlSheetData, ScannedTransactionData, Location } from '../types';
 import { useUsageLimits } from '../context/UsageLimitsContext';
 import Spinner from './Spinner';
@@ -9,65 +11,35 @@ interface ScanDocumentProps {
   locations: Location[];
 }
 
-const compressImage = (file: File, maxWidth: number = 1024, quality: number = 0.8): Promise<File> => {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) {
-        resolve(file);
-        return;
-    }
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxWidth) {
-            width = Math.round((width * maxWidth) / height);
-            height = maxWidth;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('No se pudo obtener el contexto del canvas.'));
-        ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) return reject(new Error('La conversión de Canvas a Blob falló.'));
-            const newFile = new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() });
-            resolve(newFile);
-          }, 'image/jpeg', quality
-        );
-      };
-      img.onerror = (error) => reject(new Error("No se pudo cargar la imagen para la compresión."));
-    };
-    reader.onerror = (error) => reject(new Error("Falló la lectura del archivo."));
-  });
-};
-
 const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations }) => {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
+  const [analysisSource, setAnalysisSource] = useState<AnalysisSource | null>(null);
+  const [analysisFromCache, setAnalysisFromCache] = useState(false);
   const [scannedData, setScannedData] = useState<ScannedTransactionData | ScannedControlSheetData[] | null>(null);
   const [documentType, setDocumentType] = useState<DocumentType>(DocumentType.INCOME);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
+  const providerLabel = useMemo(() => getProviderLabel(), []);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const analysisSourceLabel = useMemo(() => {
+    if (!analysisSource) return null;
+    const base = analysisSource === 'qr'
+      ? 'QR local'
+      : analysisSource === 'ocr'
+        ? 'OCR local'
+        : `IA remota (${providerLabel})`;
+    return analysisFromCache ? `${base} · cacheado` : base;
+  }, [analysisSource, analysisFromCache, providerLabel]);
 
   useEffect(() => {
     if (locations.length > 0 && !selectedLocationId) {
@@ -83,42 +55,45 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
 
   const startScan = useCallback(async (fileToScan: File) => {
     if (!fileToScan) return;
-    if (!isGeminiConfigured) {
-      setError('La integración con Gemini no está configurada. Agrega la clave VITE_GEMINI_API_KEY para habilitar el escaneo automático.');
-      setScannedData(null);
-      setPreview(null);
-      return;
-    }
-    if (!canUseRemoteAnalysis('document')) {
-      const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
-      const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
-      setError(`${reason} Usa el registro manual o el escaneo QR hasta el reinicio (${resetMessage}).`);
-      setScannedData(null);
-      setPreview(null);
-      return;
-    }
+
+    const providerConfigured = isRemoteProviderConfigured();
+    const allowRemote = providerConfigured && canUseRemoteAnalysis('document');
+
     setIsLoading(true);
     setError(null);
     setScannedData(null);
-    try {
-      const compressedFile = await compressImage(fileToScan);
-      setFile(compressedFile);
-      const reader = new FileReader();
-      reader.onloadend = () => setPreview(reader.result as string);
-      reader.readAsDataURL(compressedFile);
+    setAnalysisSource(null);
+    setAnalysisFromCache(false);
 
-      let result;
+    if (!providerConfigured) {
+      setAnalysisNotice(`Proveedor ${providerLabel} no configurado. Operando con QR y OCR local sin costos externos.`);
+    } else if (!allowRemote) {
+      const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
+      const reason = usageState?.degradeReason ?? 'La cuota remota está agotada.';
+      setAnalysisNotice(`${reason} Se ejecutará únicamente QR/OCR local hasta ${resetMessage}.`);
+    } else {
+      setAnalysisNotice(null);
+    }
+
+    try {
+      const outcome = await analyzeDocument(fileToScan, documentType, { allowRemote });
+      setFile(outcome.processedFile);
+      setPreview(outcome.previewDataUrl);
       if (documentType === DocumentType.CONTROL) {
-        result = await scanControlSheet(compressedFile);
-        if (result.length === 0) setError('La IA no pudo detectar ninguna fila en la planilla. Intenta con una imagen más clara.');
+        setScannedData(outcome.data as ScannedControlSheetData[]);
       } else {
-        result = await scanDocument(compressedFile);
-        if (result.items.length === 0) setError('La IA no pudo detectar ningún artículo en el documento. Por favor, intenta con una imagen más clara.');
+        setScannedData(outcome.data as ScannedTransactionData);
       }
-      recordRemoteUsage('document');
-      setScannedData(result);
+      setAnalysisSource(outcome.source);
+      setAnalysisFromCache(outcome.fromCache);
+      if (outcome.usedRemote && !outcome.fromCache) {
+        recordRemoteUsage('document');
+      }
     } catch (err: any) {
-      setError(err.message || 'Ocurrió un error desconocido.');
+      console.error('Error durante el escaneo:', err);
+      setError(err.message || 'Ocurrió un error al procesar el documento.');
+      setScannedData(null);
+      setPreview(null);
     } finally {
       setIsLoading(false);
     }
@@ -135,6 +110,9 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
     setScannedData(null);
     setError(null);
     setIsLoading(false);
+    setAnalysisNotice(null);
+    setAnalysisSource(null);
+    setAnalysisFromCache(false);
     setDocumentType(DocumentType.INCOME);
   };
 
@@ -233,6 +211,12 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 md:p-8 rounded-2xl shadow-lg">
       <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-6">Escanear Documento (IA)</h2>
+
+      {analysisNotice && (
+        <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-500/40 dark:bg-yellow-900/30 dark:text-yellow-200">
+          {analysisNotice}
+        </div>
+      )}
       
       {isCameraOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 p-4">
@@ -287,6 +271,10 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
                 <div className="space-y-4 mb-6">
                     {renderScannedData()}
                 </div>
+
+                {analysisSourceLabel && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-right mb-4">Origen del análisis: {analysisSourceLabel}</p>
+                )}
 
                 {locations.length > 0 ? (
                      <div className="mb-6">
