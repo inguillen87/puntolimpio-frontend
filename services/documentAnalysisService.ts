@@ -171,7 +171,8 @@ export const analyzeDocument = async (
 
   let source: AnalysisSource = 'ocr';
   let usedRemote = false;
-  let payload: ScannedTransactionData | ScannedControlSheetData[];
+  let payload: ScannedTransactionData | ScannedControlSheetData[] | null = null;
+  let remoteError: Error | null = null;
 
   const qrContent = await tryDecodeQr(dataUrl);
   if (qrContent) {
@@ -198,37 +199,55 @@ export const analyzeDocument = async (
     }
   }
 
-  if (docType === DocumentType.CONTROL) {
-    payload = normalizeControlRows(await runLocalControlAnalysis(processedFile));
-  } else {
-    payload = normalizeTransaction(await runLocalTransactionAnalysis(processedFile));
+  if (options.allowRemote && isRemoteProviderConfigured()) {
+    try {
+      if (docType === DocumentType.CONTROL) {
+        const remoteRows = normalizeControlRows(await scanControlSheetRemote(processedFile));
+        if (remoteRows.length > 0) {
+          payload = remoteRows;
+          source = 'remote';
+          usedRemote = true;
+        }
+      } else {
+        const remoteTransaction = normalizeTransaction(await scanDocumentRemote(processedFile));
+        if (remoteTransaction.items.length > 0) {
+          payload = remoteTransaction;
+          source = 'remote';
+          usedRemote = true;
+        }
+      }
+    } catch (error: any) {
+      console.error('Fallo el análisis remoto', error);
+      remoteError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (!payload) {
+    if (docType === DocumentType.CONTROL) {
+      payload = normalizeControlRows(await runLocalControlAnalysis(processedFile));
+    } else {
+      payload = normalizeTransaction(await runLocalTransactionAnalysis(processedFile));
+    }
+  }
+
+  if (!payload) {
+    throw new Error('No se pudo procesar el documento.');
   }
 
   const hasData = docType === DocumentType.CONTROL
     ? (payload as ScannedControlSheetData[]).length > 0
     : (payload as ScannedTransactionData).items.length > 0;
 
-  if (!hasData && options.allowRemote && isRemoteProviderConfigured()) {
-    try {
-      if (docType === DocumentType.CONTROL) {
-        payload = normalizeControlRows(await scanControlSheetRemote(processedFile));
-      } else {
-        payload = normalizeTransaction(await scanDocumentRemote(processedFile));
-      }
-      source = 'remote';
-      usedRemote = true;
-    } catch (error: any) {
-      console.error('Fallo el análisis remoto', error);
-      throw new Error(`El proveedor remoto ${getProviderLabel()} devolvió un error: ${error.message || error}`);
+  if (!hasData) {
+    if (remoteError) {
+      throw new Error(`El proveedor remoto ${getProviderLabel()} devolvió un error: ${remoteError.message}`);
     }
-  } else if (!hasData && (!options.allowRemote || !isRemoteProviderConfigured())) {
-    throw new Error('No se pudo extraer información con OCR local y el análisis remoto está deshabilitado. Usa el registro manual.');
-  }
-
-  if (docType === DocumentType.CONTROL && (payload as ScannedControlSheetData[]).length === 0) {
-    throw new Error('No se pudo detectar ninguna fila en la planilla. Intenta con una imagen más clara.');
-  }
-  if (docType !== DocumentType.CONTROL && (payload as ScannedTransactionData).items.length === 0) {
+    if (!options.allowRemote || !isRemoteProviderConfigured()) {
+      throw new Error('No se pudo extraer información con OCR local y el análisis remoto está deshabilitado. Usa el registro manual.');
+    }
+    if (docType === DocumentType.CONTROL) {
+      throw new Error('No se pudo detectar ninguna fila en la planilla. Intenta con una imagen más clara.');
+    }
     throw new Error('No se encontraron artículos válidos en el documento.');
   }
 
