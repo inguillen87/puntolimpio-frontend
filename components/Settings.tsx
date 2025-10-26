@@ -3,6 +3,7 @@ import { Location, User, UserOrInvitation, UserRole, Partner, PartnerType } from
 import EditableCell from './EditableCell';
 import Spinner from './Spinner';
 import UserManagement from './UserManagement';
+import UsageQuotaBanner from './UsageQuotaBanner';
 
 interface SettingsProps {
   locations: Location[];
@@ -138,10 +139,12 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-8">
-        <UserManagement 
-            currentUser={currentUser} 
-            users={users} 
-            onUpdateUser={onUpdateUser} 
+        <UsageQuotaBanner />
+
+        <UserManagement
+            currentUser={currentUser}
+            users={users}
+            onUpdateUser={onUpdateUser}
             onDeleteUser={onDeleteUser}
             onCancelInvitation={onCancelInvitation}
             onInviteUser={onInviteUser}

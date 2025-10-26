@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
+import * as echarts from 'echarts';
 import { Item, Transaction, AnalyticsData, TransactionType, ItemType, ControlRecord, ItemSize } from '../types';
-
-declare const echarts: any;
 
 // --- Configuration Constants ---
 const CHAPA_ESTIMATED_VALUE = 25; 

@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as echarts from 'echarts';
 import { Organization, DailyUsage, UserOrInvitation, UserRole, User } from '../types';
 import * as db from '../services/databaseService';
 import Spinner from './Spinner';
 import EditableCell from './EditableCell';
 import UserManagement from './UserManagement';
-
-declare const echarts: any;
 
 const StatCard: React.FC<{ title: string, value: React.ReactNode, icon: React.ReactNode }> = ({ title, value, icon }) => (
     <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-xl flex items-center space-x-4">
