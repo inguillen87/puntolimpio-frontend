@@ -754,6 +754,8 @@ const AppContent: React.FC = () => {
             <LandingPage
                 onLoginRequest={() => setAuthView('login')}
                 onRegisterRequest={() => setAuthView('register')}
+                theme={theme}
+                onToggleTheme={toggleTheme}
             />
         );
     }
