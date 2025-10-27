@@ -19,6 +19,13 @@ const escapeHtml = (value: string): string =>
          .replace(/"/g, '&quot;')
          .replace(/'/g, '&#39;');
 
+const escapeHtmlAttribute = (value: string): string =>
+    value
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
 const buildLogoHtml = (logoDataUrl: string | null): string =>
     logoDataUrl ? `<img src="${logoDataUrl}" alt="Punto Limpio" style="height:70px;margin-bottom:12px;" />` : '';
 
@@ -151,7 +158,7 @@ export const exportWarehouseLogExcel = async (rows: WarehouseLogExportRow[], org
                 <td>${escapeHtml(row.partner)}</td>
                 <td>${escapeHtml(row.location)}</td>
                 <td>${escapeHtml(row.documentName)}</td>
-                <td>${row.documentUrl ? `<a href="${escapeHtml(row.documentUrl)}" style="color:#2563eb;">Abrir Documento</a>` : ''}</td>
+                <td>${row.documentUrl ? `<a href="${escapeHtmlAttribute(row.documentUrl)}" style="color:#2563eb;text-decoration:underline;" target="_blank" rel="noopener noreferrer">${escapeHtml(row.documentUrl)}</a>` : ''}</td>
             </tr>
         `).join('')
         : '<tr><td colspan="8" style="text-align:center;">No hay movimientos registrados en el periodo seleccionado.</td></tr>';
