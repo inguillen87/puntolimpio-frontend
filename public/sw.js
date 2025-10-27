@@ -3,7 +3,7 @@ const CORE_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon512.png',
+  '/puntolimpio.png',
 ];
 
 self.addEventListener('install', (event) => {
