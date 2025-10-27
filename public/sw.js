@@ -22,7 +22,22 @@ self.addEventListener('install', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  if (request.url.includes('firebase') || request.url.includes('googleapis')) {
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch (error) {
+    return;
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return;
+  }
+
+  if (url.hostname.includes('firebase') || url.hostname.includes('googleapis')) {
     return;
   }
 
