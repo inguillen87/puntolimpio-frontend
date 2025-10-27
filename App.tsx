@@ -10,6 +10,7 @@ import Settings from './components/Settings';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import Login from './components/Login';
 import Register from './components/Register';
+import LandingPage from './components/LandingPage';
 import QrScanner from './components/QrScanner';
 import AiAssistant from './components/AiAssistant';
 import QrCodeBulkDisplayModal from './components/QrCodeBulkDisplayModal';
@@ -27,7 +28,7 @@ const databaseService = isFirebaseConfigured ? db : mockDb;
 
 type Tab = 'dashboard' | 'scan' | 'qrscan' | 'manual' | 'warehouse' | 'analytics' | 'control' | 'settings' | 'superadmin';
 type Theme = 'light' | 'dark';
-type AuthView = 'login' | 'register';
+type AuthView = 'landing' | 'login' | 'register';
 
 const TABS: { id: Tab; label: string; roles: UserRole[] }[] = [
     { id: 'superadmin', label: 'Plataforma', roles: [UserRole.SUPER_ADMIN] },
@@ -79,7 +80,7 @@ const LocationFilter: React.FC<{
 const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [authView, setAuthView] = useState<AuthView>('login');
+  const [authView, setAuthView] = useState<AuthView>('landing');
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [usersInOrg, setUsersInOrg] = useState<UserOrInvitation[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
@@ -225,6 +226,7 @@ const AppContent: React.FC = () => {
             setPartners([]);
             setViewingAsOrgId(null);
             setIsLoading(false);
+            setAuthView('landing');
         }
         setAuthChecked(true);
     });
@@ -747,8 +749,24 @@ const AppContent: React.FC = () => {
     return <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center"><Spinner /></div>
   }
   if (!currentUser) {
-    if (authView === 'login') return <Login onSwitchToRegister={() => setAuthView('register')} isFirebaseConfigured={isFirebaseConfigured} />;
-    return <Register onSwitchToLogin={() => setAuthView('login')} />;
+    if (authView === 'landing') {
+        return (
+            <LandingPage
+                onLoginRequest={() => setAuthView('login')}
+                onRegisterRequest={() => setAuthView('register')}
+            />
+        );
+    }
+    if (authView === 'login') {
+        return (
+            <Login
+                onSwitchToRegister={() => setAuthView('register')}
+                isFirebaseConfigured={isFirebaseConfigured}
+                onBackToLanding={() => setAuthView('landing')}
+            />
+        );
+    }
+    return <Register onSwitchToLogin={() => setAuthView('login')} onBackToLanding={() => setAuthView('landing')} />;
   }
   
   return (
