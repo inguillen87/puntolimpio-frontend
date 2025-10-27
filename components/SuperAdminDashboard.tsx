@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import * as echarts from 'echarts';
+import type { ECharts } from '../utils/echartsLoader';
+import { loadEcharts } from '../utils/echartsLoader';
 import { Organization, DailyUsage, UserOrInvitation, UserRole, User } from '../types';
 import * as db from '../services/databaseService';
 import Spinner from './Spinner';
@@ -44,22 +45,50 @@ const OrganizationDetails: React.FC<{
     }, [organization.id]);
 
     useEffect(() => {
-        if (!dailyUsage || !chartRef.current) return;
+        if (!dailyUsage) {
+            return undefined;
+        }
 
-        const chart = echarts.init(chartRef.current, 'dark');
-        chart.setOption({
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'category', data: dailyUsage.map(d => new Date(d.date).toLocaleDateString('es-ES', {day: '2-digit', month: '2-digit'})) },
-            yAxis: { type: 'value', name: 'Escaneos' },
-            series: [{ name: 'Escaneos IA', type: 'bar', data: dailyUsage.map(d => d.count), itemStyle: { color: '#3b82f6' } }],
-            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-        });
+        let cancelled = false;
+        let chart: ECharts | null = null;
 
-        const resizeHandler = () => chart.resize();
+        const resizeHandler = () => {
+            chart?.resize();
+        };
+
+        const renderChart = async () => {
+            try {
+                const echarts = await loadEcharts();
+                if (cancelled || !chartRef.current) {
+                    return;
+                }
+
+                const existing = echarts.getInstanceByDom(chartRef.current);
+                existing?.dispose();
+
+                chart = echarts.init(chartRef.current, 'dark');
+                chart.setOption({
+                    tooltip: { trigger: 'axis' },
+                    xAxis: { type: 'category', data: dailyUsage.map(d => new Date(d.date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })) },
+                    yAxis: { type: 'value', name: 'Escaneos' },
+                    series: [{ name: 'Escaneos IA', type: 'bar', data: dailyUsage.map(d => d.count), itemStyle: { color: '#3b82f6' } }],
+                    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                });
+
+                resizeHandler();
+            } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error('No se pudo renderizar el gráfico de uso diario.', error);
+            }
+        };
+
+        void renderChart();
         window.addEventListener('resize', resizeHandler);
+
         return () => {
+            cancelled = true;
             window.removeEventListener('resize', resizeHandler);
-            chart.dispose();
+            chart?.dispose();
         };
     }, [dailyUsage]);
 
