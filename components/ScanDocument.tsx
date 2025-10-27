@@ -24,6 +24,7 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
   const [documentType, setDocumentType] = useState<DocumentType>(DocumentType.INCOME);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraInitializing, setIsCameraInitializing] = useState(false);
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   const providerLabel = useMemo(() => getProviderLabel(), []);
   
@@ -137,20 +138,58 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
   };
   
   const handleOpenCamera = async () => {
+    if (isCameraOpen && !isCameraInitializing) {
+      return;
+    }
+
+    setError(null);
+    setIsCameraOpen(true);
+    setIsCameraInitializing(true);
+
+    const constraints: MediaStreamConstraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30, max: 60 },
+      },
+      audio: false,
+    };
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const hasLiveStream = streamRef.current?.getTracks().some(track => track.readyState === 'live');
+      const stream = hasLiveStream && streamRef.current ? streamRef.current : await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setIsCameraOpen(true);
-      setError(null);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(err => {
+            console.error('Error reproduciendo stream de cámara:', err);
+          });
+        }
+      }
     } catch (err) {
       console.error("Error al acceder a la cámara:", err);
       setError("No se pudo acceder a la cámara. Asegúrate de haber otorgado los permisos necesarios.");
+      setIsCameraOpen(false);
+    } finally {
+      setIsCameraInitializing(false);
     }
   };
 
   const handleCloseCamera = () => {
-    if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraInitializing(false);
     setIsCameraOpen(false);
   };
 
@@ -220,10 +259,15 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
       
       {isCameraOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 p-4">
-            <video ref={videoRef} autoPlay playsInline className="max-w-full max-h-[70vh] rounded-lg mb-4 border-4 border-gray-600"></video>
+            <video ref={videoRef} autoPlay playsInline muted className="max-w-full max-h-[70vh] rounded-lg mb-4 border-4 border-gray-600"></video>
             <canvas ref={canvasRef} className="hidden"></canvas>
+            {isCameraInitializing && (
+              <div className="absolute top-6 right-6">
+                <Spinner />
+              </div>
+            )}
             <div className="flex items-center space-x-4">
-            <button onClick={handleTakePicture} className="bg-blue-600 text-white font-bold py-3 px-6 rounded-full hover:bg-blue-700 transition-colors duration-300 shadow-lg flex items-center space-x-2">
+            <button onClick={handleTakePicture} disabled={isCameraInitializing} className={`bg-blue-600 text-white font-bold py-3 px-6 rounded-full transition-colors duration-300 shadow-lg flex items-center space-x-2 ${isCameraInitializing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-blue-700'}`}>
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <span>Tomar Foto</span>
             </button>
