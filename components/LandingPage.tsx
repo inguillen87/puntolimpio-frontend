@@ -326,7 +326,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
           isDark ? 'border-slate-800/70 bg-slate-950/80' : 'border-slate-200 bg-white/80'
         }`}
       >
-        <div className="container mx-auto flex items-center justify-between px-6 py-5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6">
           <div className="flex items-center space-x-3">
             <img
               src="https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png"
@@ -387,7 +387,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
             </button>
           </div>
         </div>
-        <nav className="flex items-center space-x-2 overflow-x-auto px-6 pb-4 lg:hidden">{navButtons}</nav>
+        <nav className="flex items-center space-x-2 overflow-x-auto px-4 pb-4 sm:px-6 lg:hidden">{navButtons}</nav>
       </header>
 
       <main>
@@ -399,7 +399,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
                 : 'bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.2),_transparent_60%)]'
             }`}
           />
-          <div className="container relative mx-auto grid gap-12 px-6 py-24 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+          <div className="relative mx-auto grid max-w-7xl gap-12 px-4 py-24 sm:px-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
             <div className="space-y-8">
               <span
                 className={`inline-flex items-center rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.3em] ${
@@ -408,15 +408,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
                     : 'border-emerald-400/40 bg-emerald-400/10 text-emerald-600'
                 }`}
               >
-                Solución SaaS nacida en Punto Limpio Junín
+                Tecnología Punto Limpio creada en Junín, lista para el mundo
               </span>
               <h1 className="text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
-                Inteligencia en movimiento para cada residuo, desde la planta hasta el cliente final.
+                Plataforma SaaS para inventario circular, logística y analítica inteligente.
               </h1>
               <p className={`max-w-2xl text-lg ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                Punto Limpio Platform nació como respuesta a una necesidad real del municipio de Junín, Mendoza. Hoy es la
-                plataforma comercial que combina inventario, logística e infraestructura IA para cualquier planta, depósito o
-                industria que quiera medir su impacto en tiempo real.
+                Nacimos dentro de la planta recicladora Punto Limpio de Junín, Mendoza, para resolver trazabilidad, producción y logística de una planta pública.{' '}
+                Evolucionamos en una solución comercial que habilita a municipios, industrias, depósitos y operadores logísticos a medir impacto, optimizar recursos y tomar decisiones con datos en tiempo real.
               </p>
               <div className="flex flex-col space-y-3 sm:flex-row sm:space-x-4 sm:space-y-0">
                 <button
@@ -527,7 +526,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
         </section>
 
         <section id="solucion" className={`border-y ${isDark ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-slate-50'}`}>
-          <div className="container mx-auto grid gap-12 px-6 py-20 lg:grid-cols-3">
+          <div className="mx-auto grid max-w-7xl gap-12 px-4 py-20 sm:px-6 lg:grid-cols-3">
             {features.map((feature) => (
               <div
                 key={feature.title}
@@ -554,7 +553,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
         </section>
 
         <section id="impacto" className="py-20">
-          <div className="container mx-auto grid gap-12 px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
             <div className="space-y-6">
               <p className={`text-xs uppercase tracking-[0.3em] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>Impacto real</p>
               <h2 className="text-3xl font-semibold sm:text-4xl">
@@ -586,7 +585,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
           id="clientes"
           className={`border-y ${isDark ? 'border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-900/40' : 'border-slate-200 bg-gradient-to-br from-white via-emerald-50 to-sky-50'}`}
         >
-          <div className="container mx-auto grid gap-10 px-6 py-20 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+          <div className="mx-auto grid max-w-7xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
             <div className="space-y-6">
               <p className={`text-xs uppercase tracking-[0.3em] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>
                 Historias que inspiran
@@ -648,7 +647,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
         </section>
 
         <section id="contacto" className="py-20">
-          <div className="container mx-auto grid gap-10 px-6 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
             <div>
               <p className={`text-xs uppercase tracking-[0.3em] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>Contacto</p>
               <h2 className="mt-4 text-3xl font-semibold">Conversemos sobre tu proyecto circular.</h2>
@@ -720,7 +719,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
           isDark ? 'border-slate-800 bg-slate-950/90 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-600'
         }`}
       >
-        <div className="container mx-auto flex flex-col items-center justify-between gap-6 px-6 py-10 sm:flex-row">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 py-10 sm:flex-row sm:px-6">
           <p>© {new Date().getFullYear()} Punto Limpio • Inteligencia en movimiento</p>
           <div className="flex items-center space-x-6">
             <button
