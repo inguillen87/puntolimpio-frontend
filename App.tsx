@@ -18,6 +18,7 @@ import * as db from './services/databaseService';
 import * as mockDb from './services/mockDatabaseService';
 import * as authService from './services/authService';
 import { generateInventoryReport, generateAnalyticsReport } from './services/pdfService';
+import { exportAnalyticsExcel } from './services/excelService';
 import Spinner from './components/Spinner';
 import { UsageLimitsProvider, useUsageLimits } from './context/UsageLimitsContext';
 import { normalizeItemName, canonicalItemKey, normalizePartnerName } from './utils/itemNormalization';
@@ -694,12 +695,37 @@ const AppContent: React.FC = () => {
   }
 
   const handleExportInventory = (selectedItems: (Item & { stock: number })[]) => {
-    if (selectedItems.length === 0) return showNotification("Selecciona al menos un artículo para exportar.", true);
-    generateInventoryReport(selectedItems, organization?.name || 'Mi Organización');
+    if (selectedItems.length === 0) {
+        showNotification("Selecciona al menos un artículo para exportar.", true);
+        return;
+    }
+    generateInventoryReport(selectedItems, organization?.name || 'Mi Organización').catch(error => {
+        console.error('Error al generar el PDF de inventario:', error);
+        const message = error instanceof Error ? error.message : 'Error desconocido';
+        showNotification(`No se pudo exportar el inventario: ${message}`, true);
+    });
   }
   
   const handleExportAnalytics = createScopedHandler(async (orgId: string, data: AnalyticsData) => {
-      generateAnalyticsReport(data, organization?.name || 'Mi Organización');
+      try {
+          await generateAnalyticsReport(data, organization?.name || 'Mi Organización');
+      } catch (error) {
+          console.error('Error al generar el PDF de métricas:', error);
+          const message = error instanceof Error ? error.message : 'Error desconocido';
+          showNotification(`No se pudo exportar el informe de métricas: ${message}`, true);
+          throw error;
+      }
+  });
+
+  const handleExportAnalyticsExcel = createScopedHandler(async (orgId: string, data: AnalyticsData) => {
+      try {
+          await exportAnalyticsExcel(data, organization?.name || 'Mi Organización');
+      } catch (error) {
+          console.error('Error al generar el Excel de métricas:', error);
+          const message = error instanceof Error ? error.message : 'Error desconocido';
+          showNotification(`No se pudo exportar el Excel de métricas: ${message}`, true);
+          throw error;
+      }
   });
 
   const visibleTabs = useMemo(() => {
@@ -802,11 +828,34 @@ const AppContent: React.FC = () => {
         ) : (
             <>
                 {activeTab === 'dashboard' && <Dashboard items={items} transactions={filteredData.visibleTransactions} locations={locations} partners={partners} isLoading={isLoading} onExport={handleExportInventory} onUpdateItem={handleUpdateItem}/>}
-                {activeTab === 'analytics' && <Analytics items={items} transactions={filteredData.visibleTransactions} controlRecords={filteredData.visibleControlRecords} partners={partners} isLoading={isLoading} theme={theme} onExport={(data) => handleExportAnalytics(data as AnalyticsData)} />}
+                {activeTab === 'analytics' && (
+                    <Analytics
+                        items={items}
+                        transactions={filteredData.visibleTransactions}
+                        controlRecords={filteredData.visibleControlRecords}
+                        partners={partners}
+                        isLoading={isLoading}
+                        theme={theme}
+                        onExportPdf={(data) => handleExportAnalytics(data as AnalyticsData)}
+                        onExportExcel={(data) => handleExportAnalyticsExcel(data as AnalyticsData)}
+                    />
+                )}
                 {activeTab === 'scan' && <ScanDocument onConfirmUpload={handleConfirmUpload} locations={locations} />}
                 {activeTab === 'qrscan' && <QrScanner items={items} onConfirmTransaction={handleConfirmManualTransaction} locations={locations} partners={partners} selectedLocationId={selectedLocation === 'ALL' && locations.length > 0 ? locations[0].id : selectedLocation} />}
                 {activeTab === 'manual' && <ManualEntry items={items} locations={locations} partners={partners} onConfirmTransaction={handleConfirmManualTransaction} onDeleteAllData={requestDeleteAllData} />}
-                {activeTab === 'warehouse' && <WarehouseLog transactions={filteredData.visibleTransactions} items={items} locations={locations} partners={partners} isLoading={isLoading} onDeleteTransaction={handleDeleteTransaction} onDeleteSelected={handleDeleteSelectedTransactions} onUpdateTransaction={handleUpdateTransaction} />}
+                {activeTab === 'warehouse' && (
+                    <WarehouseLog
+                        transactions={filteredData.visibleTransactions}
+                        items={items}
+                        locations={locations}
+                        partners={partners}
+                        isLoading={isLoading}
+                        onDeleteTransaction={handleDeleteTransaction}
+                        onDeleteSelected={handleDeleteSelectedTransactions}
+                        onUpdateTransaction={handleUpdateTransaction}
+                        organizationName={organization?.name}
+                    />
+                )}
                 {activeTab === 'control' && <Control controlRecords={filteredData.visibleControlRecords} isLoading={isLoading} onDeleteRecord={handleDeleteControlRecord} onDeleteSelected={handleDeleteSelectedControlRecords} onUpdateRecord={handleUpdateControlRecord}/>}
                 {activeTab === 'settings' && currentUser && <Settings locations={locations} onAddLocation={handleAddLocation} onUpdateLocation={handleUpdateLocation} onDeleteLocation={handleDeleteLocation} partners={partners} onAddPartner={handleAddPartner} onUpdatePartner={handleUpdatePartner} onDeletePartner={handleDeletePartner} currentUser={currentUser} users={usersInOrg} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onCancelInvitation={handleCancelInvitation} onInviteUser={handleInviteUser}/>}
                 {activeTab === 'superadmin' && currentUser?.role === UserRole.SUPER_ADMIN && <SuperAdminDashboard onSetupNewOrganization={handleSetupNewOrganization} onUpdateOrganization={handleUpdateOrganization} onDeleteOrganization={handleDeleteOrganization} onViewOrganization={handleViewOrganization} currentUser={currentUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onCancelInvitation={handleCancelInvitation} onInviteUser={handleInviteUser}/>}
