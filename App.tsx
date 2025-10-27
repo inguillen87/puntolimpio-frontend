@@ -10,6 +10,7 @@ import Settings from './components/Settings';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import Login from './components/Login';
 import Register from './components/Register';
+import LandingPage from './components/LandingPage';
 import QrScanner from './components/QrScanner';
 import AiAssistant from './components/AiAssistant';
 import QrCodeBulkDisplayModal from './components/QrCodeBulkDisplayModal';
@@ -22,12 +23,19 @@ import { exportAnalyticsExcel } from './services/excelService';
 import Spinner from './components/Spinner';
 import { UsageLimitsProvider, useUsageLimits } from './context/UsageLimitsContext';
 import { normalizeItemName, canonicalItemKey, normalizePartnerName } from './utils/itemNormalization';
+import {
+  DEMO_ACCOUNT_EMAIL,
+  DEMO_UPLOAD_LIMIT,
+  DemoUsageSnapshot,
+  getDemoUsageSnapshot,
+  recordDemoUpload,
+} from './services/demoUsageService';
 
 const databaseService = isFirebaseConfigured ? db : mockDb;
 
 type Tab = 'dashboard' | 'scan' | 'qrscan' | 'manual' | 'warehouse' | 'analytics' | 'control' | 'settings' | 'superadmin';
 type Theme = 'light' | 'dark';
-type AuthView = 'login' | 'register';
+type AuthView = 'landing' | 'login' | 'register';
 
 const TABS: { id: Tab; label: string; roles: UserRole[] }[] = [
     { id: 'superadmin', label: 'Plataforma', roles: [UserRole.SUPER_ADMIN] },
@@ -79,7 +87,7 @@ const LocationFilter: React.FC<{
 const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [authView, setAuthView] = useState<AuthView>('login');
+  const [authView, setAuthView] = useState<AuthView>('landing');
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [usersInOrg, setUsersInOrg] = useState<UserOrInvitation[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
@@ -225,6 +233,7 @@ const AppContent: React.FC = () => {
             setPartners([]);
             setViewingAsOrgId(null);
             setIsLoading(false);
+            setAuthView('landing');
         }
         setAuthChecked(true);
     });
@@ -314,6 +323,51 @@ const AppContent: React.FC = () => {
     const orgId = viewingAsOrgId || currentUser?.organizationId;
     if (!orgId) {
         throw new Error("No hay una organización seleccionada.");
+    }
+
+    const getResetLabel = (isoDate: string) => {
+      if (!isoDate) return 'el próximo ciclo';
+      const resetDate = new Date(isoDate);
+      if (Number.isNaN(resetDate.getTime())) return 'el próximo ciclo';
+      return resetDate.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
+    };
+
+    const renderDemoUsageNote = (snapshot: DemoUsageSnapshot): React.ReactNode => {
+      const resetLabel = getResetLabel(snapshot.resetsOn);
+      if (snapshot.remaining > 0) {
+        return (
+          <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
+            Demo: quedan {snapshot.remaining} de {DEMO_UPLOAD_LIMIT} cargas disponibles hasta {resetLabel}.
+          </p>
+        );
+      }
+      return (
+        <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
+          Demo: alcanzaste el límite de {DEMO_UPLOAD_LIMIT} cargas. Escribinos a{' '}
+          <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para ampliar el acceso.
+        </p>
+      );
+    };
+
+    const isDemoUser = currentUser?.email?.toLowerCase() === DEMO_ACCOUNT_EMAIL;
+    const shouldEnforceDemoLimit = isDemoUser && (documentFile || type === DocumentType.CONTROL);
+
+    if (shouldEnforceDemoLimit) {
+      const demoSnapshot = getDemoUsageSnapshot(orgId, DEMO_UPLOAD_LIMIT);
+      if (demoSnapshot.remaining <= 0) {
+        const resetLabel = getResetLabel(demoSnapshot.resetsOn);
+        const limitMessage = (
+          <div>
+            <p>El plan demo permite un máximo de {DEMO_UPLOAD_LIMIT} cargas con documentos por ciclo.</p>
+            <p className="mt-1">
+              Esperá hasta {resetLabel} o escribinos a{' '}
+              <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para habilitar un plan completo.
+            </p>
+          </div>
+        );
+        showNotification(limitMessage, true);
+        throw new Error('Límite de cargas demo alcanzado.');
+      }
     }
 
     let documentUrl = '';
@@ -413,6 +467,16 @@ const AppContent: React.FC = () => {
                 </div>
             )
         }
+        if (shouldEnforceDemoLimit) {
+          const updatedSnapshot = recordDemoUpload(orgId, 1, DEMO_UPLOAD_LIMIT);
+          notificationMessage = (
+            <div>
+              {notificationMessage}
+              {renderDemoUsageNote(updatedSnapshot)}
+            </div>
+          );
+        }
+
         showNotification(notificationMessage);
         setActiveTab('analytics'); // Go to analytics to see the changes
     } else {
@@ -491,7 +555,22 @@ const AppContent: React.FC = () => {
             organizationId: orgId
         }));
         setTransactions(prev => [...prev, ...finalTransactions]);
-        showNotification(`${transactionItems.length} artículo(s) procesado(s) como ${type === 'INCOME' ? 'Ingreso' : 'Egreso'}.`);
+
+        let successMessage: React.ReactNode = (
+          <p>{transactionItems.length} artículo(s) procesado(s) como {type === 'INCOME' ? 'Ingreso' : 'Egreso'}.</p>
+        );
+
+        if (shouldEnforceDemoLimit) {
+          const updatedSnapshot = recordDemoUpload(orgId, 1, DEMO_UPLOAD_LIMIT);
+          successMessage = (
+            <div>
+              {successMessage}
+              {renderDemoUsageNote(updatedSnapshot)}
+            </div>
+          );
+        }
+
+        showNotification(successMessage);
         setActiveTab('dashboard');
 
         if (newItemsToSave.length > 0) {
@@ -747,8 +826,26 @@ const AppContent: React.FC = () => {
     return <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center"><Spinner /></div>
   }
   if (!currentUser) {
-    if (authView === 'login') return <Login onSwitchToRegister={() => setAuthView('register')} isFirebaseConfigured={isFirebaseConfigured} />;
-    return <Register onSwitchToLogin={() => setAuthView('login')} />;
+    if (authView === 'landing') {
+        return (
+            <LandingPage
+                onLoginRequest={() => setAuthView('login')}
+                onRegisterRequest={() => setAuthView('register')}
+                theme={theme}
+                onToggleTheme={toggleTheme}
+            />
+        );
+    }
+    if (authView === 'login') {
+        return (
+            <Login
+                onSwitchToRegister={() => setAuthView('register')}
+                isFirebaseConfigured={isFirebaseConfigured}
+                onBackToLanding={() => setAuthView('landing')}
+            />
+        );
+    }
+    return <Register onSwitchToLogin={() => setAuthView('login')} onBackToLanding={() => setAuthView('landing')} />;
   }
   
   return (
