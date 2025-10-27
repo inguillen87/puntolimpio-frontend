@@ -216,10 +216,11 @@ interface AnalyticsProps {
     partners: Partner[];
     isLoading: boolean;
     theme: 'light' | 'dark';
-    onExport: (data: AnalyticsData) => void;
+    onExportPdf: (data: AnalyticsData) => void;
+    onExportExcel?: (data: AnalyticsData) => void;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecords, partners, isLoading, theme, onExport }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecords, partners, isLoading, theme, onExportPdf, onExportExcel }) => {
     const data = useMemo(() => calculateAnalytics(items, transactions, controlRecords, partners), [items, transactions, controlRecords, partners]);
     
     const stockFlowChartRef = useRef<HTMLDivElement>(null);
@@ -264,10 +265,18 @@ const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecor
         <div className="space-y-8">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
                 <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">Métricas Clave</h1>
-                <button onClick={() => onExport(data)} className="mt-4 sm:mt-0 bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" /></svg>
-                    <span>Exportar PDF</span>
-                </button>
+                <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
+                    <button onClick={() => onExportPdf(data)} className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" /></svg>
+                        <span>Exportar PDF</span>
+                    </button>
+                    {onExportExcel && (
+                        <button onClick={() => onExportExcel(data)} className="bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1H4zm1 2h10v2H5V5zm0 4h4v2H5V9zm0 4h4v2H5v-2zm6-4h4v2h-4V9zm0 4h4v2h-4v-2z" /></svg>
+                            <span>Exportar Excel</span>
+                        </button>
+                    )}
+                </div>
             </div>
             
             <Card title="Resumen Ejecutivo (IA)">

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Item, Transaction, TransactionType, Location, Partner } from '../types';
+import { exportWarehouseLogExcel, WarehouseLogExportRow } from '../services/excelService';
 import EditableCell from './EditableCell';
 
 interface WarehouseLogProps {
@@ -11,6 +12,7 @@ interface WarehouseLogProps {
   onDeleteTransaction: (transactionId: string) => void;
   onDeleteSelected: (transactionIds: string[]) => void;
   onUpdateTransaction: (transactionId: string, updatedFields: Partial<Transaction>) => Promise<void>;
+  organizationName?: string;
 }
 
 type FilterType = 'ALL' | 'INCOME' | 'OUTCOME';
@@ -50,7 +52,7 @@ const DocumentImage: React.FC<{
 };
 
 
-const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners, transactions, isLoading, onDeleteTransaction, onDeleteSelected, onUpdateTransaction }) => {
+const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners, transactions, isLoading, onDeleteTransaction, onDeleteSelected, onUpdateTransaction, organizationName }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalImageSrc, setModalImageSrc] = useState<string | undefined>(undefined);
   const [filter, setFilter] = useState<FilterType>('ALL');
@@ -79,6 +81,8 @@ const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners,
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [transactions, filter, startDate, endDate]);
+
+  const hasTransactions = filteredAndSortedTransactions.length > 0;
 
   useEffect(() => {
     setSelected(new Set());
@@ -134,7 +138,7 @@ const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners,
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," 
-        + headers.join(",") + "\n" 
+        + headers.join(",") + "\n"
         + data.map(e => e.join(",")).join("\n");
 
     const encodedUri = encodeURI(csvContent);
@@ -145,6 +149,28 @@ const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners,
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleExportExcel = async () => {
+    if (!hasTransactions) return;
+
+    const rows: WarehouseLogExportRow[] = filteredAndSortedTransactions.map(tx => ({
+        createdAt: new Date(tx.createdAt),
+        type: tx.type === TransactionType.INCOME ? 'Ingreso' : 'Egreso',
+        itemName: itemMap.get(tx.itemId) || 'Artículo Desconocido',
+        quantity: tx.quantity,
+        partner: tx.partnerId ? (partnerMap.get(tx.partnerId) || tx.destination || 'N/A') : (tx.destination || 'N/A'),
+        location: tx.locationId ? (locationMap.get(tx.locationId) || 'General') : 'General',
+        documentName: tx.documentName || '',
+        documentUrl: tx.imageUrl || '',
+    }));
+
+    try {
+        await exportWarehouseLogExcel(rows, organizationName || 'Mi Organización');
+    } catch (error) {
+        console.error('Error al exportar el Excel de movimientos:', error);
+        window.alert('No se pudo exportar el Excel de movimientos. Intenta nuevamente.');
+    }
   };
 
   return (
@@ -164,7 +190,11 @@ const WarehouseLog: React.FC<WarehouseLogProps> = ({ items, locations, partners,
                     <option value="INCOME">Ingresos</option>
                     <option value="OUTCOME">Egresos</option>
                 </select>
-                <button onClick={handleExportCsv} title="Exportar a CSV" className="bg-green-600 text-white font-bold py-2 px-3 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 text-sm">
+                <button onClick={handleExportExcel} title="Exportar a Excel" disabled={!hasTransactions} className={`bg-blue-600 text-white font-bold py-2 px-3 rounded-lg transition-colors flex items-center space-x-2 text-sm ${hasTransactions ? 'hover:bg-blue-700' : 'opacity-60 cursor-not-allowed'}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1H4zm1 2h10v2H5V5zm0 4h4v2H5V9zm0 4h4v2H5v-2zm6-4h4v2h-4V9zm0 4h4v2h-4v-2z" /></svg>
+                    <span>Excel</span>
+                </button>
+                <button onClick={handleExportCsv} title="Exportar a CSV" disabled={!hasTransactions} className={`bg-green-600 text-white font-bold py-2 px-3 rounded-lg transition-colors flex items-center space-x-2 text-sm ${hasTransactions ? 'hover:bg-green-700' : 'opacity-60 cursor-not-allowed'}`}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                     <span>CSV</span>
                 </button>
