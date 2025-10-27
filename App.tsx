@@ -24,9 +24,9 @@ import Spinner from './components/Spinner';
 import { UsageLimitsProvider, useUsageLimits } from './context/UsageLimitsContext';
 import { normalizeItemName, canonicalItemKey, normalizePartnerName } from './utils/itemNormalization';
 import {
-  DEMO_ACCOUNT_EMAIL,
   DEMO_UPLOAD_LIMIT,
   DemoUsageSnapshot,
+  getDemoAccountConfig,
   getDemoUsageSnapshot,
   recordDemoUpload,
 } from './services/demoUsageService';
@@ -332,33 +332,38 @@ const AppContent: React.FC = () => {
       return resetDate.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
     };
 
+    const demoAccountConfig = getDemoAccountConfig(currentUser?.email);
+    const demoLimit = demoAccountConfig?.limit ?? DEMO_UPLOAD_LIMIT;
+    const usageScope = demoAccountConfig && currentUser
+      ? { organizationId: orgId, userId: currentUser.id, email: currentUser.email }
+      : null;
+
     const renderDemoUsageNote = (snapshot: DemoUsageSnapshot): React.ReactNode => {
       const resetLabel = getResetLabel(snapshot.resetsOn);
       if (snapshot.remaining > 0) {
         return (
           <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
-            Demo: quedan {snapshot.remaining} de {DEMO_UPLOAD_LIMIT} cargas disponibles hasta {resetLabel}.
+            Demo: quedan {snapshot.remaining} de {demoLimit} cargas disponibles hasta {resetLabel}.
           </p>
         );
       }
       return (
         <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
-          Demo: alcanzaste el límite de {DEMO_UPLOAD_LIMIT} cargas. Escribinos a{' '}
+          Demo: alcanzaste el límite de {demoLimit} cargas. Escribinos a{' '}
           <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para ampliar el acceso.
         </p>
       );
     };
 
-    const isDemoUser = currentUser?.email?.toLowerCase() === DEMO_ACCOUNT_EMAIL;
-    const shouldEnforceDemoLimit = isDemoUser && (documentFile || type === DocumentType.CONTROL);
+    const shouldEnforceDemoLimit = !!usageScope && (documentFile || type === DocumentType.CONTROL);
 
-    if (shouldEnforceDemoLimit) {
-      const demoSnapshot = getDemoUsageSnapshot(orgId, DEMO_UPLOAD_LIMIT);
+    if (shouldEnforceDemoLimit && usageScope) {
+      const demoSnapshot = await getDemoUsageSnapshot(usageScope, demoLimit);
       if (demoSnapshot.remaining <= 0) {
         const resetLabel = getResetLabel(demoSnapshot.resetsOn);
         const limitMessage = (
           <div>
-            <p>El plan demo permite un máximo de {DEMO_UPLOAD_LIMIT} cargas con documentos por ciclo.</p>
+            <p>El plan demo permite un máximo de {demoLimit} cargas con documentos por ciclo.</p>
             <p className="mt-1">
               Esperá hasta {resetLabel} o escribinos a{' '}
               <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para habilitar un plan completo.
@@ -467,8 +472,8 @@ const AppContent: React.FC = () => {
                 </div>
             )
         }
-        if (shouldEnforceDemoLimit) {
-          const updatedSnapshot = recordDemoUpload(orgId, 1, DEMO_UPLOAD_LIMIT);
+        if (shouldEnforceDemoLimit && usageScope) {
+          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
           notificationMessage = (
             <div>
               {notificationMessage}
@@ -560,8 +565,8 @@ const AppContent: React.FC = () => {
           <p>{transactionItems.length} artículo(s) procesado(s) como {type === 'INCOME' ? 'Ingreso' : 'Egreso'}.</p>
         );
 
-        if (shouldEnforceDemoLimit) {
-          const updatedSnapshot = recordDemoUpload(orgId, 1, DEMO_UPLOAD_LIMIT);
+        if (shouldEnforceDemoLimit && usageScope) {
+          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
           successMessage = (
             <div>
               {successMessage}
