@@ -10,6 +10,7 @@ import Settings from './components/Settings';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import Login from './components/Login';
 import Register from './components/Register';
+import LandingPage from './components/LandingPage';
 import QrScanner from './components/QrScanner';
 import AiAssistant from './components/AiAssistant';
 import QrCodeBulkDisplayModal from './components/QrCodeBulkDisplayModal';
@@ -22,12 +23,20 @@ import { exportAnalyticsExcel } from './services/excelService';
 import Spinner from './components/Spinner';
 import { UsageLimitsProvider, useUsageLimits } from './context/UsageLimitsContext';
 import { normalizeItemName, canonicalItemKey, normalizePartnerName } from './utils/itemNormalization';
+import {
+  DEMO_UPLOAD_LIMIT,
+  DemoUsageScope,
+  DemoUsageSnapshot,
+  getDemoAccountConfig,
+  getDemoUsageSnapshot,
+  recordDemoUpload,
+} from './services/demoUsageService';
 
 const databaseService = isFirebaseConfigured ? db : mockDb;
 
 type Tab = 'dashboard' | 'scan' | 'qrscan' | 'manual' | 'warehouse' | 'analytics' | 'control' | 'settings' | 'superadmin';
 type Theme = 'light' | 'dark';
-type AuthView = 'login' | 'register';
+type AuthView = 'landing' | 'login' | 'register';
 
 const TABS: { id: Tab; label: string; roles: UserRole[] }[] = [
     { id: 'superadmin', label: 'Plataforma', roles: [UserRole.SUPER_ADMIN] },
@@ -79,7 +88,7 @@ const LocationFilter: React.FC<{
 const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [authView, setAuthView] = useState<AuthView>('login');
+  const [authView, setAuthView] = useState<AuthView>('landing');
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [usersInOrg, setUsersInOrg] = useState<UserOrInvitation[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
@@ -98,7 +107,59 @@ const AppContent: React.FC = () => {
   const [confirmation, setConfirmation] = useState<{ message: string; onConfirm: () => void; } | null>(null);
   const [viewingAsOrgId, setViewingAsOrgId] = useState<string | null>(null);
   const [itemsForQrModal, setItemsForQrModal] = useState<Item[] | null>(null);
+  const [demoUsage, setDemoUsage] = useState<DemoUsageSnapshot | null>(null);
   const { setActiveOrganization, updatePlan } = useUsageLimits();
+
+  const demoAccountConfig = useMemo(() => getDemoAccountConfig(currentUser?.email), [currentUser?.email]);
+  const demoLimit = demoAccountConfig?.limit ?? DEMO_UPLOAD_LIMIT;
+  const currentUserId = currentUser?.id ?? null;
+  const currentUserEmail = currentUser?.email ?? null;
+  const currentOrgId = currentUser?.organizationId ?? null;
+  const activeOrgId = useMemo(() => viewingAsOrgId || currentOrgId || null, [viewingAsOrgId, currentOrgId]);
+  const demoUsageDocId = demoAccountConfig && activeOrgId && currentUserId ? `${activeOrgId}__${currentUserId}` : null;
+  const buildDemoUsageScope = useCallback((): DemoUsageScope | null => {
+    if (!demoAccountConfig || !currentUserId || !activeOrgId) {
+      return null;
+    }
+    return {
+      organizationId: activeOrgId,
+      userId: currentUserId,
+      email: currentUserEmail ?? undefined,
+    };
+  }, [demoAccountConfig, activeOrgId, currentUserId, currentUserEmail]);
+  const getResetLabel = useCallback((isoDate?: string | null) => {
+    if (!isoDate) return 'el próximo ciclo';
+    const resetDate = new Date(isoDate);
+    if (Number.isNaN(resetDate.getTime())) return 'el próximo ciclo';
+    return resetDate.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
+  }, []);
+
+  useEffect(() => {
+    const scope = buildDemoUsageScope();
+    if (!demoAccountConfig || !scope) {
+      setDemoUsage(null);
+      return;
+    }
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const snapshot = await getDemoUsageSnapshot(scope, demoLimit);
+        if (isMounted) {
+          setDemoUsage(snapshot);
+        }
+      } catch (error) {
+        console.warn('No se pudo recuperar el límite demo.', error);
+        if (isMounted) {
+          setDemoUsage(null);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [buildDemoUsageScope, demoAccountConfig, demoLimit]);
 
   useEffect(() => {
     if (organization?.id) {
@@ -225,6 +286,7 @@ const AppContent: React.FC = () => {
             setPartners([]);
             setViewingAsOrgId(null);
             setIsLoading(false);
+            setAuthView('landing');
         }
         setAuthChecked(true);
     });
@@ -314,6 +376,47 @@ const AppContent: React.FC = () => {
     const orgId = viewingAsOrgId || currentUser?.organizationId;
     if (!orgId) {
         throw new Error("No hay una organización seleccionada.");
+    }
+
+    const baseUsageScope = buildDemoUsageScope();
+    const usageScope = baseUsageScope ? { ...baseUsageScope, organizationId: orgId } : null;
+
+    const renderDemoUsageNote = (snapshot: DemoUsageSnapshot): React.ReactNode => {
+      const resetLabel = getResetLabel(snapshot.resetsOn);
+      if (snapshot.remaining > 0) {
+        return (
+          <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
+            Demo: quedan {snapshot.remaining} de {demoLimit} cargas disponibles hasta {resetLabel}.
+          </p>
+        );
+      }
+      return (
+        <p className="mt-3 text-sm text-white/80 dark:text-gray-100/80">
+          Demo: alcanzaste el límite de {demoLimit} cargas. Escribinos a{' '}
+          <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para ampliar el acceso.
+        </p>
+      );
+    };
+
+    const shouldEnforceDemoLimit = !!usageScope && (documentFile || type === DocumentType.CONTROL);
+
+    if (shouldEnforceDemoLimit && usageScope) {
+      const demoSnapshot = await getDemoUsageSnapshot(usageScope, demoLimit);
+      setDemoUsage(demoSnapshot);
+      if (demoSnapshot.remaining <= 0) {
+        const resetLabel = getResetLabel(demoSnapshot.resetsOn);
+        const limitMessage = (
+          <div>
+            <p>El plan demo permite un máximo de {demoLimit} cargas con documentos por ciclo.</p>
+            <p className="mt-1">
+              Esperá hasta {resetLabel} o escribinos a{' '}
+              <a href="mailto:info@puntolimpio.ar" className="underline font-semibold">info@puntolimpio.ar</a> para habilitar un plan completo.
+            </p>
+          </div>
+        );
+        showNotification(limitMessage, true);
+        throw new Error('Límite de cargas demo alcanzado.');
+      }
     }
 
     let documentUrl = '';
@@ -413,6 +516,17 @@ const AppContent: React.FC = () => {
                 </div>
             )
         }
+        if (shouldEnforceDemoLimit && usageScope) {
+          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
+          setDemoUsage(updatedSnapshot);
+          notificationMessage = (
+            <div>
+              {notificationMessage}
+              {renderDemoUsageNote(updatedSnapshot)}
+            </div>
+          );
+        }
+
         showNotification(notificationMessage);
         setActiveTab('analytics'); // Go to analytics to see the changes
     } else {
@@ -491,14 +605,40 @@ const AppContent: React.FC = () => {
             organizationId: orgId
         }));
         setTransactions(prev => [...prev, ...finalTransactions]);
-        showNotification(`${transactionItems.length} artículo(s) procesado(s) como ${type === 'INCOME' ? 'Ingreso' : 'Egreso'}.`);
+
+        let successMessage: React.ReactNode = (
+          <p>{transactionItems.length} artículo(s) procesado(s) como {type === 'INCOME' ? 'Ingreso' : 'Egreso'}.</p>
+        );
+
+        if (shouldEnforceDemoLimit && usageScope) {
+          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
+          setDemoUsage(updatedSnapshot);
+          successMessage = (
+            <div>
+              {successMessage}
+              {renderDemoUsageNote(updatedSnapshot)}
+            </div>
+          );
+        }
+
+        showNotification(successMessage);
         setActiveTab('dashboard');
 
         if (newItemsToSave.length > 0) {
             setItemsForQrModal(newItemsToSave);
         }
     }
-}, [items, partners, currentUser, viewingAsOrgId, handleAddPartner, handleUpdatePartner]);
+  }, [
+    items,
+    partners,
+    currentUser,
+    viewingAsOrgId,
+    handleAddPartner,
+    handleUpdatePartner,
+    buildDemoUsageScope,
+    demoLimit,
+    getResetLabel,
+  ]);
 
   const handleConfirmManualTransaction = useCallback(async (transactionItems: ScannedItem[], type: TransactionType, documentFile?: File, locationId?: string, partnerId?: string, newPartnerName?: string) => {
     const scannedData: ScannedTransactionData = {
@@ -747,8 +887,26 @@ const AppContent: React.FC = () => {
     return <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center"><Spinner /></div>
   }
   if (!currentUser) {
-    if (authView === 'login') return <Login onSwitchToRegister={() => setAuthView('register')} isFirebaseConfigured={isFirebaseConfigured} />;
-    return <Register onSwitchToLogin={() => setAuthView('login')} />;
+    if (authView === 'landing') {
+        return (
+            <LandingPage
+                onLoginRequest={() => setAuthView('login')}
+                onRegisterRequest={() => setAuthView('register')}
+                theme={theme}
+                onToggleTheme={toggleTheme}
+            />
+        );
+    }
+    if (authView === 'login') {
+        return (
+            <Login
+                onSwitchToRegister={() => setAuthView('register')}
+                isFirebaseConfigured={isFirebaseConfigured}
+                onBackToLanding={() => setAuthView('landing')}
+            />
+        );
+    }
+    return <Register onSwitchToLogin={() => setAuthView('login')} onBackToLanding={() => setAuthView('landing')} />;
   }
   
   return (
@@ -761,6 +919,12 @@ const AppContent: React.FC = () => {
                       <h1 className="text-xl md:text-2xl font-bold text-blue-600 dark:text-blue-500">Punto Limpio</h1>
                       {organization && <span className='text-xs font-semibold text-gray-500 dark:text-gray-400'>{organization.name} {viewingAsOrgId && '(Vista Super Admin)'}</span>}
                   </div>
+                  {demoAccountConfig && (
+                    <div className="ml-4 hidden sm:flex items-center space-x-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:border-blue-700 dark:bg-blue-900/50 dark:text-blue-200">
+                      <span>Modo Demo</span>
+                      <span className="text-[11px] font-bold normal-case">{demoUsage ? `${demoUsage.used}/${demoLimit}` : `--/${demoLimit}`}</span>
+                    </div>
+                  )}
                   {currentUser.role === UserRole.SUPER_ADMIN && viewingAsOrgId && (
                       <button onClick={handleReturnToSuperAdmin} className="ml-6 bg-yellow-500 text-white font-bold py-2 px-3 rounded-lg hover:bg-yellow-600 transition-colors flex items-center space-x-2 text-sm">
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 011.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" /></svg>
@@ -772,6 +936,11 @@ const AppContent: React.FC = () => {
                   )}
               </div>
               <div className="flex items-center space-x-2 md:space-x-4">
+                {demoAccountConfig && (
+                  <div className="sm:hidden rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:border-blue-700 dark:bg-blue-900/50 dark:text-blue-200">
+                    Demo {demoUsage ? `${demoUsage.used}/${demoLimit}` : `--/${demoLimit}`}
+                  </div>
+                )}
                 <nav className="hidden md:flex space-x-1 bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
                     {visibleTabs.map(({ id, label }) => (
                         <button key={id} onClick={() => setActiveTab(id)} className={`px-3 py-2 text-sm font-medium rounded-md transition-all duration-300 ${activeTab === id ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
@@ -823,6 +992,57 @@ const AppContent: React.FC = () => {
       )}
       
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {demoAccountConfig && (
+          <section className="mb-8 rounded-2xl border border-blue-200 bg-blue-50/70 p-6 text-blue-900 shadow-sm dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-100">
+            <div className="flex items-start">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-md dark:bg-blue-500">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3l-6.928-12c-.77-1.333-2.694-1.333-3.464 0l-6.928 12c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="ml-4">
+                <h2 className="text-lg font-semibold tracking-tight">Modo demo protegido</h2>
+                <p className="mt-2 text-sm leading-relaxed">
+                  Estás operando con la cuenta demo <span className="font-semibold">{demoAccountConfig.label}</span>. Este perfil puede subir hasta{' '}
+                  <span className="font-semibold">{demoLimit}</span> archivos analizados por ciclo.{' '}
+                  {demoUsage
+                    ? `Te quedan ${demoUsage.remaining} intentos hasta ${getResetLabel(demoUsage.resetsOn)}.`
+                    : 'Cuando realices tu primera carga te mostraremos el progreso en tiempo real.'}
+                </p>
+                <ul className="mt-4 space-y-2 text-sm">
+                  <li className="flex items-start space-x-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Creá o administrá el usuario demo desde <strong>Firebase Console &gt; Authentication</strong>. Yo no puedo generar contraseñas por seguridad.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Asigná la cuenta a la organización de pruebas desde el panel de Super Admin o editando el documento correspondiente en la colección <code className="rounded bg-blue-900/20 px-1 py-0.5">users</code>.</span>
+                  </li>
+                  <li className="flex items-start space-x-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>
+                      Para resetear el contador antes de la fecha indicada, eliminá o edita el documento{' '}
+                      <code className="rounded bg-blue-900/20 px-1 py-0.5">demoUsageLimits/{demoUsageDocId ?? 'ORG__UID'}</code> en Firestore o escribinos a{' '}
+                      <a href="mailto:info@puntolimpio.ar" className="font-semibold underline">info@puntolimpio.ar</a>.
+                    </span>
+                  </li>
+                </ul>
+                <p className="mt-4 text-xs text-blue-900/80 dark:text-blue-200/80">
+                  ¿Necesitás un tour guiado? También podés coordinarlo por WhatsApp en{' '}
+                  <a href="https://wa.me/17432643718" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+1 (743) 264-3718</a>{' '}
+                  o con Marcelo al{' '}
+                  <a href="https://wa.me/5492613168608" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+54 9 261 316-8608</a>.
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
         {isLoading || activeTab === null ? (
             <div className="flex justify-center items-center h-64"><Spinner /></div>
         ) : (

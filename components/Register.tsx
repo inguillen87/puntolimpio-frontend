@@ -4,9 +4,10 @@ import Spinner from './Spinner';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
+  onBackToLanding?: () => void;
 }
 
-const Register: React.FC<RegisterProps> = ({ onSwitchToLogin }) => {
+const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -53,6 +54,15 @@ const Register: React.FC<RegisterProps> = ({ onSwitchToLogin }) => {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 space-y-8">
+        {onBackToLanding && (
+          <button
+            onClick={onBackToLanding}
+            className="inline-flex items-center text-sm font-medium text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
+          >
+            <span aria-hidden className="mr-2">←</span>
+            Volver a la landing
+          </button>
+        )}
         <div>
           <img src="https://chatboc-demo-widget-oigs.vercel.app/puntolimpio.png" alt="Punto Limpio Logo" className="mx-auto h-20 w-auto" />
           <h2 className="mt-6 text-center text-3xl font-bold text-gray-900 dark:text-white">
