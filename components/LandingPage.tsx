@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import * as echarts from 'echarts';
+import type { ECharts } from '../utils/echartsLoader';
+import { loadEcharts } from '../utils/echartsLoader';
 
 type Theme = 'light' | 'dark';
 
@@ -143,129 +144,155 @@ const RealtimeCharts: React.FC<{ theme: Theme }> = ({ theme }) => {
   const recoveryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const charts: echarts.ECharts[] = [];
-    const baseLabelColor = theme === 'dark' ? '#e2e8f0' : '#1f2937';
-    const gridLineColor = theme === 'dark' ? '#1f2937' : '#e2e8f0';
-    const secondaryText = theme === 'dark' ? '#94a3b8' : '#475569';
+    let cancelled = false;
+    let throughputChart: ECharts | undefined;
+    let recoveryChart: ECharts | undefined;
     let throughputInterval: number | undefined;
     let recoveryInterval: number | undefined;
 
-    if (throughputRef.current) {
-      const existing = echarts.getInstanceByDom(throughputRef.current);
-      if (existing) {
-        existing.dispose();
-      }
-      const chart = echarts.init(throughputRef.current, undefined, { renderer: 'svg' });
-      const baseData = [420, 468, 510, 556, 590, 620, 675];
-      chart.setOption({
-        backgroundColor: 'transparent',
-        textStyle: { color: baseLabelColor },
-        tooltip: { trigger: 'axis' },
-        grid: { top: 30, left: 45, right: 20, bottom: 35 },
-        xAxis: {
-          type: 'category',
-          data: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
-          boundaryGap: false,
-          axisLine: { lineStyle: { color: secondaryText } },
-          axisLabel: { color: secondaryText },
-        },
-        yAxis: {
-          type: 'value',
-          axisLine: { lineStyle: { color: secondaryText } },
-          splitLine: { lineStyle: { color: gridLineColor, type: 'dashed' } },
-          axisLabel: { color: secondaryText },
-        },
-        series: [
-          {
-            name: 'Kg procesados',
-            type: 'line',
-            smooth: true,
-            data: baseData,
-            symbol: 'circle',
-            symbolSize: 8,
-            lineStyle: { width: 3, color: '#10b981' },
-            areaStyle: {
-              color: theme === 'dark' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.2)',
+    const handleResize = () => {
+      throughputChart?.resize();
+      recoveryChart?.resize();
+    };
+
+    const setupCharts = async () => {
+      try {
+        const echarts = await loadEcharts();
+        if (cancelled) {
+          return;
+        }
+
+        const baseLabelColor = theme === 'dark' ? '#e2e8f0' : '#1f2937';
+        const gridLineColor = theme === 'dark' ? '#1f2937' : '#e2e8f0';
+        const secondaryText = theme === 'dark' ? '#94a3b8' : '#475569';
+        const baseData = [420, 468, 510, 556, 590, 620, 675];
+
+        if (throughputRef.current) {
+          const existing = echarts.getInstanceByDom(throughputRef.current);
+          existing?.dispose();
+
+          throughputChart = echarts.init(throughputRef.current, undefined, { renderer: 'svg' });
+          throughputChart.setOption({
+            backgroundColor: 'transparent',
+            textStyle: { color: baseLabelColor },
+            tooltip: { trigger: 'axis' },
+            grid: { top: 30, left: 45, right: 20, bottom: 35 },
+            xAxis: {
+              type: 'category',
+              data: ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'],
+              boundaryGap: false,
+              axisLine: { lineStyle: { color: secondaryText } },
+              axisLabel: { color: secondaryText },
             },
-          },
-        ],
-      });
-
-      let tick = 0;
-      throughputInterval = window.setInterval(() => {
-        const next = baseData.map((value, index) => {
-          const variation = Math.sin((tick + index) / 2) * 12;
-          return Math.round(value + variation);
-        });
-        chart.setOption({ series: [{ data: next }] });
-        tick += 1;
-      }, 4000);
-
-      charts.push(chart);
-    }
-
-    if (recoveryRef.current) {
-      const existing = echarts.getInstanceByDom(recoveryRef.current);
-      if (existing) {
-        existing.dispose();
-      }
-      const chart = echarts.init(recoveryRef.current, undefined, { renderer: 'svg' });
-      chart.setOption({
-        backgroundColor: 'transparent',
-        textStyle: { color: baseLabelColor },
-        tooltip: { trigger: 'item' },
-        series: [
-          {
-            name: 'Tasa de recuperación',
-            type: 'gauge',
-            startAngle: 180,
-            endAngle: 0,
-            center: ['50%', '65%'],
-            radius: '100%',
-            progress: { show: true, roundCap: true, width: 14 },
-            axisLine: {
-              lineStyle: {
-                width: 14,
-                color: [
-                  [0.4, theme === 'dark' ? '#334155' : '#e2e8f0'],
-                  [0.7, '#22d3ee'],
-                  [1, '#10b981'],
-                ],
+            yAxis: {
+              type: 'value',
+              axisLine: { lineStyle: { color: secondaryText } },
+              splitLine: { lineStyle: { color: gridLineColor, type: 'dashed' } },
+              axisLabel: { color: secondaryText },
+            },
+            series: [
+              {
+                name: 'Kg procesados',
+                type: 'line',
+                smooth: true,
+                data: baseData,
+                symbol: 'circle',
+                symbolSize: 8,
+                lineStyle: { width: 3, color: '#10b981' },
+                areaStyle: {
+                  color: theme === 'dark' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.2)',
+                },
               },
-            },
-            pointer: { show: false },
-            axisTick: { show: false },
-            splitLine: { show: false },
-            axisLabel: { color: secondaryText, distance: -20 },
-            title: { offsetCenter: [0, '75%'], color: secondaryText },
-            detail: {
-              valueAnimation: true,
-              formatter: '{value}%',
-              color: baseLabelColor,
-              fontSize: 28,
-              offsetCenter: [0, '10%'],
-            },
-            data: [{ value: 82, name: 'Recuperación' }],
-          },
-        ],
-      });
+            ],
+          });
 
-      recoveryInterval = window.setInterval(() => {
-        const value = 80 + Math.round(Math.random() * 8);
-        chart.setOption({ series: [{ data: [{ value, name: 'Recuperación' }] }] });
-      }, 5000);
+          let tick = 0;
+          throughputInterval = window.setInterval(() => {
+            if (!throughputChart) {
+              return;
+            }
+            const next = baseData.map((value, index) => {
+              const variation = Math.sin((tick + index) / 2) * 12;
+              return Math.round(value + variation);
+            });
+            throughputChart.setOption({ series: [{ data: next }] });
+            tick += 1;
+          }, 4000);
+        }
 
-      charts.push(chart);
-    }
+        if (recoveryRef.current) {
+          const existing = echarts.getInstanceByDom(recoveryRef.current);
+          existing?.dispose();
+
+          recoveryChart = echarts.init(recoveryRef.current, undefined, { renderer: 'svg' });
+          recoveryChart.setOption({
+            backgroundColor: 'transparent',
+            textStyle: { color: baseLabelColor },
+            tooltip: { trigger: 'item' },
+            series: [
+              {
+                name: 'Tasa de recuperación',
+                type: 'gauge',
+                startAngle: 180,
+                endAngle: 0,
+                center: ['50%', '65%'],
+                radius: '100%',
+                progress: { show: true, roundCap: true, width: 14 },
+                axisLine: {
+                  lineStyle: {
+                    width: 14,
+                    color: [
+                      [0.4, theme === 'dark' ? '#334155' : '#e2e8f0'],
+                      [0.7, '#22d3ee'],
+                      [1, '#10b981'],
+                    ],
+                  },
+                },
+                pointer: { show: false },
+                axisTick: { show: false },
+                splitLine: { show: false },
+                axisLabel: { color: secondaryText, distance: -20 },
+                title: { offsetCenter: [0, '75%'], color: secondaryText },
+                detail: {
+                  valueAnimation: true,
+                  formatter: '{value}%',
+                  color: baseLabelColor,
+                  fontSize: 28,
+                  offsetCenter: [0, '10%'],
+                },
+                data: [{ value: 82, name: 'Recuperación' }],
+              },
+            ],
+          });
+
+          recoveryInterval = window.setInterval(() => {
+            if (!recoveryChart) {
+              return;
+            }
+            const value = 80 + Math.round(Math.random() * 8);
+            recoveryChart.setOption({ series: [{ data: [{ value, name: 'Recuperación' }] }] });
+          }, 5000);
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('No se pudieron cargar los gráficos en tiempo real.', error);
+      }
+    };
+
+    void setupCharts();
+    window.addEventListener('resize', handleResize);
 
     return () => {
+      cancelled = true;
+      window.removeEventListener('resize', handleResize);
       if (throughputInterval !== undefined) {
         window.clearInterval(throughputInterval);
       }
       if (recoveryInterval !== undefined) {
         window.clearInterval(recoveryInterval);
       }
-      charts.forEach((chart) => chart.dispose());
+      throughputChart?.dispose();
+      recoveryChart?.dispose();
     };
   }, [theme]);
 
@@ -590,7 +617,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
               <p className={`text-xs uppercase tracking-[0.3em] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>
                 Historias que inspiran
               </p>
-              <h2 className="text-3xl font-semibold sm:text-4xl">Los pioneros del Punto Limpio marcan el camino.</h2>
+              <h2 className="text-3xl font-semibold sm:text-4xl">Los pioneros de Punto Limpio marcan el camino.</h2>
               <p className={`text-base leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                 Acompañamos a municipios, cooperativas y empresas que buscan digitalizar su operación y escalar modelos de
                 economía circular con datos confiables.

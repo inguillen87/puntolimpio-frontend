@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import * as echarts from 'echarts';
+import type { ECharts } from '../utils/echartsLoader';
+import { loadEcharts } from '../utils/echartsLoader';
 import { Item, Transaction, AnalyticsData, TransactionType, ItemType, ControlRecord, ItemSize, Partner } from '../types';
 import { normalizePartnerName } from '../utils/itemNormalization';
 
@@ -228,30 +229,57 @@ const Analytics: React.FC<AnalyticsProps> = ({ items, transactions, controlRecor
     const chartTheme = theme === 'dark' ? 'dark' : 'light';
 
     useEffect(() => {
-        if (isLoading || !data.totalStock) return;
+        if (isLoading || !data.totalStock) return undefined;
 
-        const charts = [
-             { ref: stockFlowChartRef, options: getStockFlowOptions(data.stockFlow) },
-             { ref: stockByTypeChartRef, options: getStockByTypeOptions(data.stockByType) },
-        ];
-        
-        let instances: any[] = [];
-        charts.forEach(({ ref, options }) => {
-            if (ref.current) {
-                const chart = echarts.init(ref.current, chartTheme);
-                chart.setOption(options);
-                instances.push(chart);
+        let cancelled = false;
+        let instances: ECharts[] = [];
+
+        const resizeHandler = () => {
+            instances.forEach(chart => chart.resize());
+        };
+
+        const setupCharts = async () => {
+            try {
+                const echarts = await loadEcharts();
+                if (cancelled) {
+                    return;
+                }
+
+                const charts = [
+                    { ref: stockFlowChartRef, options: getStockFlowOptions(data.stockFlow) },
+                    { ref: stockByTypeChartRef, options: getStockByTypeOptions(data.stockByType) },
+                ];
+
+                instances = charts
+                    .map(({ ref, options }) => {
+                        if (!ref.current) {
+                            return undefined;
+                        }
+                        const existing = echarts.getInstanceByDom(ref.current);
+                        existing?.dispose();
+
+                        const chart = echarts.init(ref.current, chartTheme);
+                        chart.setOption(options);
+                        return chart;
+                    })
+                    .filter((chart): chart is ECharts => Boolean(chart));
+
+                resizeHandler();
+            } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error('No se pudieron inicializar los gráficos de analíticas.', error);
             }
-        });
-        
-        const resizeHandler = () => instances.forEach(chart => chart.resize());
+        };
+
+        void setupCharts();
         window.addEventListener('resize', resizeHandler);
 
         return () => {
+            cancelled = true;
             window.removeEventListener('resize', resizeHandler);
             instances.forEach(chart => chart.dispose());
         };
-    }, [data, isLoading, theme]);
+    }, [chartTheme, data, isLoading]);
 
     if (isLoading) {
         return <div className="text-center p-8 text-gray-500 dark:text-gray-400">Calculando métricas...</div>;
