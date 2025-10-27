@@ -116,7 +116,6 @@ const AppContent: React.FC = () => {
   const currentUserEmail = currentUser?.email ?? null;
   const currentOrgId = currentUser?.organizationId ?? null;
   const activeOrgId = useMemo(() => viewingAsOrgId || currentOrgId || null, [viewingAsOrgId, currentOrgId]);
-  const demoUsageDocId = demoAccountConfig && activeOrgId && currentUserId ? `${activeOrgId}__${currentUserId}` : null;
   const buildDemoUsageScope = useCallback((): DemoUsageScope | null => {
     if (!demoAccountConfig || !currentUserId || !activeOrgId) {
       return null;
@@ -994,51 +993,82 @@ const AppContent: React.FC = () => {
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {demoAccountConfig && (
           <section className="mb-8 rounded-2xl border border-blue-200 bg-blue-50/70 p-6 text-blue-900 shadow-sm dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-100">
-            <div className="flex items-start">
-              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-md dark:bg-blue-500">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3l-6.928-12c-.77-1.333-2.694-1.333-3.464 0l-6.928 12c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-md dark:bg-blue-500">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3l-6.928-12c-.77-1.333-2.694-1.333-3.464 0l-6.928 12c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight">Demo supervisada Punto Limpio</h2>
+                  <p className="mt-2 text-sm leading-relaxed">
+                    Esta sesión utiliza credenciales de demostración <span className="font-semibold">{demoAccountConfig.label}</span>. Para proteger la infraestructura de IA,
+                    el entorno permite hasta <span className="font-semibold">{demoLimit}</span> documentos analizados por ciclo controlado.
+                    {' '}
+                    {demoUsage
+                      ? `Quedan ${demoUsage.remaining} envíos disponibles hasta ${getResetLabel(demoUsage.resetsOn)}.`
+                      : 'Apenas registres el primer documento mostraremos el consumo en tiempo real.'}
+                  </p>
+                  <p className="mt-3 text-sm leading-relaxed text-blue-900/90 dark:text-blue-100/90">
+                    Los accesos <span className="font-semibold">demo@demo.com</span> y <span className="font-semibold">prueba@prueba.com</span> comparten estas salvaguardas y se restauran automáticamente al iniciar cada ciclo.
+                  </p>
+                </div>
               </div>
-              <div className="ml-4">
-                <h2 className="text-lg font-semibold tracking-tight">Modo demo protegido</h2>
-                <p className="mt-2 text-sm leading-relaxed">
-                  Estás operando con la cuenta demo <span className="font-semibold">{demoAccountConfig.label}</span>. Este perfil puede subir hasta{' '}
-                  <span className="font-semibold">{demoLimit}</span> archivos analizados por ciclo.{' '}
-                  {demoUsage
-                    ? `Te quedan ${demoUsage.remaining} intentos hasta ${getResetLabel(demoUsage.resetsOn)}.`
-                    : 'Cuando realices tu primera carga te mostraremos el progreso en tiempo real.'}
-                </p>
-                <ul className="mt-4 space-y-2 text-sm">
-                  <li className="flex items-start space-x-2">
+              {demoUsage && (
+                <div className="rounded-2xl border border-blue-300/60 bg-white/50 px-4 py-3 text-right text-sm font-medium text-blue-800 shadow-inner dark:border-blue-700/60 dark:bg-blue-900/20 dark:text-blue-100">
+                  <p>Cupo utilizado</p>
+                  <p className="text-2xl font-bold">{demoUsage.used}/{demoLimit}</p>
+                  <p className="text-xs font-normal text-blue-700/80 dark:text-blue-200/80">Resetea {getResetLabel(demoUsage.resetsOn)}</p>
+                </div>
+              )}
+            </div>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-blue-200/70 bg-white/70 p-5 text-sm text-blue-900 dark:border-blue-700/60 dark:bg-blue-950/40 dark:text-blue-100">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-500 dark:text-blue-300">Resguardos activos</h3>
+                <ul className="mt-3 space-y-2">
+                  <li className="flex items-start gap-2">
                     <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span>Creá o administrá el usuario demo desde <strong>Firebase Console &gt; Authentication</strong>. Yo no puedo generar contraseñas por seguridad.</span>
+                    <span>Monitoreo antifraude y corte automático cuando el cupo llega al 100&nbsp;%.</span>
                   </li>
-                  <li className="flex items-start space-x-2">
+                  <li className="flex items-start gap-2">
                     <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span>Asigná la cuenta a la organización de pruebas desde el panel de Super Admin o editando el documento correspondiente en la colección <code className="rounded bg-blue-900/20 px-1 py-0.5">users</code>.</span>
+                    <span>Reinicio mensual automatizado para mantener la data demo alineada a las pruebas.</span>
                   </li>
-                  <li className="flex items-start space-x-2">
+                  <li className="flex items-start gap-2">
                     <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span>
-                      Para resetear el contador antes de la fecha indicada, eliminá o edita el documento{' '}
-                      <code className="rounded bg-blue-900/20 px-1 py-0.5">demoUsageLimits/{demoUsageDocId ?? 'ORG__UID'}</code> en Firestore o escribinos a{' '}
-                      <a href="mailto:info@puntolimpio.ar" className="font-semibold underline">info@puntolimpio.ar</a>.
-                    </span>
+                    <span>Auditoría continua del equipo de Punto Limpio para prevenir abusos y garantizar continuidad.</span>
                   </li>
                 </ul>
-                <p className="mt-4 text-xs text-blue-900/80 dark:text-blue-200/80">
-                  ¿Necesitás un tour guiado? También podés coordinarlo por WhatsApp en{' '}
-                  <a href="https://wa.me/17432643718" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+1 (743) 264-3718</a>{' '}
-                  o con Marcelo al{' '}
-                  <a href="https://wa.me/5492613168608" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+54 9 261 316-8608</a>.
-                </p>
+              </div>
+              <div className="rounded-2xl border border-blue-200/70 bg-white/70 p-5 text-sm text-blue-900 dark:border-blue-700/60 dark:bg-blue-950/40 dark:text-blue-100">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-500 dark:text-blue-300">Acompañamiento dedicado</h3>
+                <ul className="mt-3 space-y-2">
+                  <li className="flex items-start gap-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Escribinos a <a href="mailto:info@puntolimpio.ar" className="font-semibold underline">info@puntolimpio.ar</a> para ampliar cupos o solicitar restablecimientos anticipados.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Coordiná un onboarding por WhatsApp con nuestro asistente en <a href="https://wa.me/17432643718" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+1 (743) 264-3718</a> o directamente con Marcelo en <a href="https://wa.me/5492613168608" target="_blank" rel="noopener noreferrer" className="font-semibold underline">+54 9 261 316-8608</a>.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Solución desarrollada en alianza con <span className="font-semibold">chatboc.ar</span> para pilotos seguros en gobiernos y empresas.</span>
+                  </li>
+                </ul>
               </div>
             </div>
           </section>

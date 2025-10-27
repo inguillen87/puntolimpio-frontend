@@ -16,12 +16,12 @@ const LIMITED_ACCOUNTS: Record<string, DemoAccountConfig> = {
   'demo@demo.com': {
     email: 'demo@demo.com',
     limit: DEMO_UPLOAD_LIMIT,
-    label: 'Demo público',
+    label: 'Demo corporativa',
   },
   'prueba@prueba.com': {
     email: 'prueba@prueba.com',
     limit: DEMO_UPLOAD_LIMIT,
-    label: 'Piloto Junín',
+    label: 'Demo corporativa',
   },
 };
 
