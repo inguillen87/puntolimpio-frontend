@@ -1066,7 +1066,20 @@ const AppContent: React.FC = () => {
                     <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span>Solución desarrollada en alianza con <span className="font-semibold">chatboc.ar</span> para pilotos seguros en gobiernos y empresas.</span>
+                    <span>
+                      En sociedad con{' '}
+                      <a
+                        href="https://chatboc.ar"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold underline decoration-blue-300 decoration-2 underline-offset-2"
+                      >
+                        chatboc.ar
+                      </a>{' '}
+                      • Innovación y desarrollo tecnológico. Liderado por el Ing. Marcelo Guillen, potenciamos la inteligencia
+                      aplicada a inventario, logística e infraestructura con agentes conversacionales y automatización
+                      avanzada.
+                    </span>
                   </li>
                 </ul>
               </div>

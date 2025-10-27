@@ -103,7 +103,11 @@ const navItems = [
   { id: 'contacto', label: 'Contacto' },
 ];
 
-const contactOptions = [
+const contactOptions: {
+  label: string;
+  href: string;
+  description: React.ReactNode;
+}[] = [
   {
     label: 'info@puntolimpio.ar',
     href: 'mailto:info@puntolimpio.ar',
@@ -117,7 +121,20 @@ const contactOptions = [
   {
     label: 'WhatsApp contrataciones',
     href: 'https://wa.me/5492613168608',
-    description: '+54 9 261 316 8608 • Marcelo Guillen, CEO chatboc.ar.',
+    description: (
+      <span>
+        +54 9 261 316 8608 • Ing. Marcelo Guillen,&nbsp;
+        <a
+          href="https://chatboc.ar"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold underline decoration-emerald-500/70 decoration-2 underline-offset-2"
+        >
+          chatboc.ar
+        </a>
+        .
+      </span>
+    ),
   },
 ];
 
@@ -659,10 +676,20 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginRequest, onRegisterReq
               </div>
               <div className={`mt-10 rounded-3xl border p-6 ${isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-white'}`}>
                 <p className="text-sm font-semibold uppercase tracking-[0.3em]">En sociedad con</p>
-                <p className="mt-2 text-lg font-semibold">chatboc.ar • Innovación y desarrollo tecnológico</p>
+                <p className="mt-2 text-lg font-semibold">
+                  <a
+                    href="https://chatboc.ar"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-500 transition hover:text-emerald-400"
+                  >
+                    chatboc.ar
+                  </a>{' '}
+                  • Innovación y desarrollo tecnológico
+                </p>
                 <p className={`mt-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                  Liderado por Marcelo Guillen, potenciamos la inteligencia aplicada a inventario, logística e infraestructura
-                  con agentes conversacionales y automatización avanzada.
+                  Liderado por el Ing. Marcelo Guillen, potenciamos la inteligencia aplicada a inventario, logística e
+                  infraestructura con agentes conversacionales y automatización avanzada.
                 </p>
               </div>
             </div>
