@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { registerUser } from '../services/authService';
+import { isFirebaseConfigured } from '../firebaseConfig';
+import * as databaseService from '../services/databaseService';
+import * as mockDatabaseService from '../services/mockDatabaseService';
 import Spinner from './Spinner';
 
 interface RegisterProps {
@@ -7,27 +10,40 @@ interface RegisterProps {
   onBackToLanding?: () => void;
 }
 
+const dbService = isFirebaseConfigured ? databaseService : mockDatabaseService;
+
 const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showInviteRequiredModal, setShowInviteRequiredModal] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading) return;
-    
+
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden.');
       return;
     }
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
-      await registerUser(email, password);
+      const normalizedEmail = email.trim().toLowerCase();
+      const invitation = await dbService.findUserInvitationByEmail(normalizedEmail);
+      if (!invitation) {
+        setPendingEmail(email.trim());
+        setShowInviteRequiredModal(true);
+        setIsLoading(false);
+        return;
+      }
+
+      await registerUser(normalizedEmail, password);
       // Success will be handled by the onAuthStateChanged observer in App.tsx
       // It will automatically log the user in.
     } catch (err: any) {
@@ -49,6 +65,15 @@ const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding })
       }
       setIsLoading(false);
     }
+  };
+
+  const closeInviteModal = () => {
+    setShowInviteRequiredModal(false);
+  };
+
+  const handleDemoLoginRedirect = () => {
+    closeInviteModal();
+    onSwitchToLogin();
   };
 
   return (
@@ -135,6 +160,46 @@ const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding })
             </button>
          </p>
       </div>
+      {showInviteRequiredModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 text-gray-900 shadow-2xl dark:bg-gray-800 dark:text-gray-100">
+            <h3 className="text-xl font-semibold">Se requiere una invitación</h3>
+            <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+              Para crear una cuenta nueva necesitamos confirmar una invitación previa. No encontramos ninguna invitación activa para
+              {pendingEmail ? ` ${pendingEmail}` : ' este correo'}.
+            </p>
+            <div className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-300">
+              <p>
+                ¿Querés explorar la plataforma? Podés ingresar con la cuenta demo desde la opción de iniciar sesión.
+              </p>
+              <p>
+                Si necesitás acceso administrativo, escribinos a{' '}
+                <a
+                  href="mailto:info@puntolimpio.ar?subject=Solicitud%20de%20invitaci%C3%B3n%20-%20Punto%20Limpio&body=Hola%20equipo%20de%20Punto%20Limpio,%0A%0AMe%20gustar%C3%ADa%20solicitar%20una%20invitaci%C3%B3n%20para%20acceder%20a%20la%20plataforma.%0A%0AGracias!"
+                  className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  info@puntolimpio.ar
+                </a>
+                 y coordinamos el alta de tu organización.
+              </p>
+            </div>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                onClick={handleDemoLoginRedirect}
+                className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-800"
+              >
+                Ir a Iniciar Sesión (Cuenta Demo)
+              </button>
+              <button
+                onClick={closeInviteModal}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700 dark:focus:ring-offset-gray-800"
+              >
+                Seguir editando correo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
