@@ -89,7 +89,7 @@ const buildRecordFromSeed = (organizationId: string, seed?: UsagePlanSeed): Stor
   const monthlyQuota = seed?.monthlyQuota ?? DEFAULT_MONTHLY_QUOTA;
   return {
     organizationId,
-    planName: seed?.planName ?? 'Plan Enterprise (Demo)',
+    planName: seed?.planName ?? 'Plan Demo Corporativo',
     monthlyQuota,
     dailyQuota: seed?.dailyQuota,
     perMinuteQuota: seed?.perMinuteQuota,
