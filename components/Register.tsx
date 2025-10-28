@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { registerUser } from '../services/authService';
+import { isFirebaseConfigured } from '../firebaseConfig';
+import * as databaseService from '../services/databaseService';
+import * as mockDatabaseService from '../services/mockDatabaseService';
 import Spinner from './Spinner';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
   onBackToLanding?: () => void;
 }
+
+const dbService = isFirebaseConfigured ? databaseService : mockDatabaseService;
 
 const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding }) => {
   const [email, setEmail] = useState('');
@@ -48,6 +53,15 @@ const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding })
       }
     }
     setIsLoading(false);
+  };
+
+  const closeInviteModal = () => {
+    setShowInviteRequiredModal(false);
+  };
+
+  const handleDemoLoginRedirect = () => {
+    closeInviteModal();
+    onSwitchToLogin();
   };
 
   const closeInviteModal = () => {
