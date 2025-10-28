@@ -149,11 +149,15 @@ const formatTransactionsTable = (
   records: Transaction[],
   knowledge: KnowledgeBase,
   limit: number
-): string => {
+): { text: string; html: string } => {
   if (records.length === 0) {
-    return 'No hay transacciones registradas.';
+    return {
+      text: 'No hay transacciones registradas.',
+      html: '<p class="text-sm text-gray-600 dark:text-gray-300">No hay transacciones registradas.</p>',
+    };
   }
 
+  const headers = ['Fecha', 'Artículo', 'Cantidad', 'Destino'];
   const rows = records.slice(0, limit).map(tx => {
     const item = knowledge.itemsById.get(tx.itemId);
     const partner = tx.partnerId ? knowledge.partnersById.get(tx.partnerId) : undefined;
@@ -162,16 +166,47 @@ const formatTransactionsTable = (
       : tx.destination
         ? normalizePartnerName(tx.destination)
         : 'Sin destino';
-    return `| ${formatDate(tx.createdAt)} | ${item?.name ?? 'Artículo desconocido'} | ${tx.quantity} | ${destination} |`;
+    return {
+      date: formatDate(tx.createdAt),
+      itemName: item?.name ?? 'Artículo desconocido',
+      quantity: tx.quantity,
+      destination,
+    };
   });
 
-  return ['| Fecha | Artículo | Cantidad | Destino |', '| --- | --- | --- | --- |', ...rows].join('\n');
+  const textRows = rows.map(row => `| ${row.date} | ${row.itemName} | ${row.quantity} | ${row.destination} |`);
+  const text = ['| Fecha | Artículo | Cantidad | Destino |', '| --- | --- | --- | --- |', ...textRows].join('\n');
+
+  const htmlRows = rows
+    .map(
+      row =>
+        `<tr class="border-b border-gray-200 dark:border-gray-700"><td class="py-1 pr-3 font-medium">${row.date}</td><td class="py-1 pr-3">${row.itemName}</td><td class="py-1 pr-3 text-right">${row.quantity}</td><td class="py-1">${row.destination}</td></tr>`
+    )
+    .join('');
+  const html = `
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-100">
+          <tr>
+            ${headers
+              .map(header => `<th scope="col" class="px-3 py-2 font-semibold uppercase tracking-wide text-xs">${header}</th>`)
+              .join('')}
+          </tr>
+        </thead>
+        <tbody class="text-gray-700 dark:text-gray-100">
+          ${htmlRows}
+        </tbody>
+      </table>
+    </div>
+  `.trim();
+
+  return { text, html };
 };
 
 const summarizePartnerActivity = (
   partnerQuery: string,
   knowledge: KnowledgeBase
-): string | null => {
+): { content: string; decoratedHtml?: string } | null => {
   const sanitizedQuery = sanitizeForSearch(partnerQuery);
   const match = knowledge.partnerSearchIndex.find(entry =>
     sanitizedQuery.includes(entry.search) || entry.search.includes(sanitizedQuery)
@@ -192,14 +227,30 @@ const summarizePartnerActivity = (
     return tx.destination ? sanitizeForSearch(tx.destination) === match.search : false;
   });
   if (related.length === 0) {
-    return `No hay egresos asociados a ${normalizedName}.`;
+    const content = `No hay egresos asociados a ${normalizedName}.`;
+    return {
+      content,
+      decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
+    };
   }
   const totalUnits = related.reduce((sum, tx) => sum + tx.quantity, 0);
   const table = formatTransactionsTable(related, knowledge, Math.min(related.length, 5));
-  return `Resumen de ${normalizedName}: ${related.length} egresos por ${totalUnits} unidades.\n\n${table}`;
+  const header = `Resumen para ${normalizedName}: ${related.length} entregas registradas, ${totalUnits} unidades en total.`;
+  return {
+    content: `${header}\n\n${table.text}`,
+    decoratedHtml: `
+      <div class="space-y-3">
+        <p class="text-sm text-gray-700 dark:text-gray-200"><strong>Resumen para ${normalizedName}</strong>: ${related.length} entregas registradas, ${totalUnits} unidades en total.</p>
+        ${table.html}
+      </div>
+    `.trim(),
+  };
 };
 
-const resolveLocalAnswer = (question: string, knowledge: KnowledgeBase): string | null => {
+const resolveLocalAnswer = (
+  question: string,
+  knowledge: KnowledgeBase
+): { content: string; decoratedHtml?: string } | null => {
   const trimmedQuestion = question.trim();
   if (!trimmedQuestion) return null;
 
@@ -225,7 +276,11 @@ const resolveLocalAnswer = (question: string, knowledge: KnowledgeBase): string 
 
   if (maybeItem && /stock|inventario|quedo|hay/.test(lowerQuestion)) {
     const stock = knowledge.stockByItemId.get(maybeItem.item.id) ?? 0;
-    return `Stock disponible de ${maybeItem.item.name}: ${stock} unidad${stock === 1 ? '' : 'es'}.`;
+    const content = `Stock disponible de ${maybeItem.item.name}: ${stock} unidad${stock === 1 ? '' : 'es'}.`;
+    return {
+      content,
+      decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200"><strong>${maybeItem.item.name}</strong>: ${stock} unidad${stock === 1 ? '' : 'es'} disponibles en inventario.</p>`,
+    };
   }
 
   if (/(egreso|venta)/.test(lowerQuestion)) {
@@ -234,12 +289,25 @@ const resolveLocalAnswer = (question: string, knowledge: KnowledgeBase): string 
       const limit = limitMatch ? Math.min(parseInt(limitMatch[1], 10), 20) : 5;
       const table = formatTransactionsTable(knowledge.outcomesSorted, knowledge, limit);
       const { docs, totalUnits } = formatTotals(knowledge.outcomesSorted.slice(0, limit));
-      return `Últimos ${docs} egresos (${totalUnits} unidades):\n\n${table}`;
+      const intro = `Últimas ${docs} salidas registradas (${totalUnits} unidades en total):`;
+      return {
+        content: `${intro}\n\n${table.text}`,
+        decoratedHtml: `
+          <div class="space-y-3">
+            <p class="text-sm text-gray-700 dark:text-gray-200">${intro}</p>
+            ${table.html}
+          </div>
+        `.trim(),
+      };
     }
 
     if (/cu[aá]nt/.test(lowerQuestion) || /total/.test(lowerQuestion)) {
       const { docs, totalUnits } = formatTotals(knowledge.outcomesSorted);
-      return `Se registraron ${docs} egresos recientes por un total de ${totalUnits} unidades.`;
+      const content = `Se registraron ${docs} salidas recientes por un total de ${totalUnits} unidades.`;
+      return {
+        content,
+        decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
+      };
     }
   }
 
@@ -249,12 +317,25 @@ const resolveLocalAnswer = (question: string, knowledge: KnowledgeBase): string 
       const limit = limitMatch ? Math.min(parseInt(limitMatch[1], 10), 20) : 5;
       const table = formatTransactionsTable(knowledge.incomesSorted, knowledge, limit);
       const { docs, totalUnits } = formatTotals(knowledge.incomesSorted.slice(0, limit));
-      return `Últimos ${docs} ingresos (${totalUnits} unidades):\n\n${table}`;
+      const intro = `Últimas ${docs} entradas registradas (${totalUnits} unidades en total):`;
+      return {
+        content: `${intro}\n\n${table.text}`,
+        decoratedHtml: `
+          <div class="space-y-3">
+            <p class="text-sm text-gray-700 dark:text-gray-200">${intro}</p>
+            ${table.html}
+          </div>
+        `.trim(),
+      };
     }
 
     if (/cu[aá]nt/.test(lowerQuestion) || /total/.test(lowerQuestion)) {
       const { docs, totalUnits } = formatTotals(knowledge.incomesSorted);
-      return `Se registraron ${docs} ingresos recientes por un total de ${totalUnits} unidades.`;
+      const content = `Se registraron ${docs} entradas recientes por un total de ${totalUnits} unidades.`;
+      return {
+        content,
+        decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
+      };
     }
   }
 
@@ -419,7 +500,14 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
 
     const localAnswer = resolveLocalAnswer(userMessage, knowledge);
     if (localAnswer) {
-      updateConversation([...newMessages, { sender: 'ai', content: localAnswer }]);
+      updateConversation([
+        ...newMessages,
+        {
+          sender: 'ai',
+          content: localAnswer.content,
+          ...(localAnswer.decoratedHtml ? { decoratedHtml: localAnswer.decoratedHtml } : {}),
+        },
+      ]);
       return;
     }
 
@@ -601,7 +689,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
                                 <div
                                   className="prose prose-sm dark:prose-invert"
                                   dangerouslySetInnerHTML={{
-                                    __html: (msg.decoratedHtml ?? msg.content).replace(/\n/g, '<br />'),
+                                    __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
                                   }}
                                 />
                             </div>
