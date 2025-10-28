@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ItemType, ScannedTransactionData, ScannedControlSheetData } from '../types';
 import { normalizeItemName } from '../utils/itemNormalization';
+import type { AssistantConversationTurn } from './aiService';
 
 const GEMINI_API_KEY =
   import.meta.env.VITE_GEMINI_API_KEY ??
@@ -35,8 +36,29 @@ const fileToGenerativePart = async (file: File) => {
   };
 };
 
-export const getAiAssistantResponse = async (context: string, question: string): Promise<string> => {
+export const getAiAssistantResponse = async (
+  context: string,
+  question: string,
+  history: AssistantConversationTurn[] = [],
+  summary?: string
+): Promise<string> => {
     const model = 'gemini-2.5-flash';
+    const trimmedQuestion = question.trim();
+    const historySnippet = history
+      .map(turn => {
+        const cleaned = turn.content.trim();
+        if (!cleaned) return null;
+        return `${turn.role === 'user' ? 'Usuario' : 'Asistente'}: ${cleaned}`;
+      })
+      .filter((entry): entry is string => Boolean(entry))
+      .join('\n');
+
+    const summarySnippet = summary && summary.trim().length > 0
+      ? `\n\nResumen de conversación previo:\n${summary.trim()}`
+      : '';
+
+    const historySection = historySnippet ? `\n\nHistorial reciente:\n${historySnippet}` : '';
+
     const prompt = `
         **System**: Eres "Punto Limpio AI", un asistente experto en logística y gestión de inventario. Tu conocimiento se basa ÚNICAMENTE en el contexto de datos JSON proporcionado. Responde de forma concisa, profesional y directa a la pregunta del usuario. Formatea las listas y tablas de forma clara usando Markdown para fácil lectura.
 
@@ -47,10 +69,10 @@ export const getAiAssistantResponse = async (context: string, question: string):
         - Si no puedes responder con los datos proporcionados, indícalo claramente diciendo "No tengo suficiente información para responder a esa pregunta". No inventes datos.
 
         **Contexto de Datos (JSON)**:
-        ${context}
+        ${context}${summarySnippet}${historySection}
 
         **Pregunta del Usuario**:
-        ${question}
+        ${trimmedQuestion}
     `;
     try {
         const ai = getClient();
