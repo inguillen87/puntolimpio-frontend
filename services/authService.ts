@@ -55,6 +55,17 @@ export const registerUser = async (email: string, password: string) => {
                 throw invitationError;
             }
         } catch (profileError: any) {
+            if (profileError?.code === 'permission-denied') {
+                try {
+                    await deleteUser(userCredential.user);
+                } catch (cleanupError) {
+                    console.error('No se pudo eliminar el usuario tras un fallo de permisos:', cleanupError);
+                }
+                const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
+                invitationError.code = 'invitation/required';
+                throw invitationError;
+            }
+
             if (profileError?.code !== 'invitation/required') {
                 try {
                     await deleteUser(userCredential.user);
