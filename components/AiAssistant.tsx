@@ -8,7 +8,6 @@ import {
 } from '../services/aiService';
 import { DEMO_UPLOAD_LIMIT, DemoUsageSnapshot } from '../services/demoUsageService';
 import { canonicalItemKey, normalizePartnerName } from '../utils/itemNormalization';
-import Spinner from './Spinner';
 import { useUsageLimits } from '../context/UsageLimitsContext';
 
 interface AiAssistantProps {
@@ -81,6 +80,21 @@ const MAX_MEMORY_TURNS = 8;
 const MAX_SUMMARY_LENGTH = 1400;
 
 const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const SUGGESTED_PROMPTS: { label: string; prompt: string }[] = [
+  {
+    label: 'Alertas de stock',
+    prompt: '¿Qué artículos tienen stock bajo y cuáles son sus cantidades actuales?',
+  },
+  {
+    label: 'Últimos movimientos',
+    prompt: 'Mostrame los últimos egresos registrados con destino y unidades.',
+  },
+  {
+    label: 'Resumen diario',
+    prompt: 'Generá un resumen de entradas y salidas de inventario del día.',
+  },
+];
 
 const buildMarkdownTable = (headers: string[], rows: string[][]): string => {
   if (rows.length === 0) {
@@ -748,9 +762,11 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(() => new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   const aiAvailable = isRemoteProviderConfigured();
   const providerLabel = getProviderLabel();
+  const effectiveDemoLimit = demoLimit ?? DEMO_UPLOAD_LIMIT;
 
   const conversationSummaryRef = useRef<string>('');
   const cachedAnswersRef = useRef<Map<string, string>>(new Map());
@@ -868,9 +884,75 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     };
   }, [items, transactions, partners]);
 
+  const inventoryPulse = useMemo(
+    () => {
+      const stockValues = Array.from(knowledge.stockByItemId.values());
+      const totalUnits = stockValues.reduce((acc, value) => acc + value, 0);
+      const activeItems = items.filter(item => (knowledge.stockByItemId.get(item.id) ?? 0) > 0).length;
+      const lowStockThreshold = 10;
+      const lowStockCount = items.filter(item => {
+        const stock = knowledge.stockByItemId.get(item.id) ?? 0;
+        return stock > 0 && stock <= lowStockThreshold;
+      }).length;
+      const latestTransaction = knowledge.outcomesSorted[0] ?? knowledge.incomesSorted[0] ?? null;
+      const lastMovementLabel = latestTransaction
+        ? `${formatDate(latestTransaction.createdAt)} • ${
+            latestTransaction.type === TransactionType.OUTCOME ? 'Egreso' : 'Ingreso'
+          }`
+        : 'Sin movimientos recientes';
+
+      return {
+        totalUnits,
+        activeItems,
+        lowStockCount,
+        lowStockThreshold,
+        lastMovementLabel,
+      };
+    },
+    [knowledge, items]
+  );
+
+  const demoUsageSummary = useMemo(() => {
+    if (!isDemoAccount) {
+      return null;
+    }
+
+    const limit = effectiveDemoLimit > 0 ? effectiveDemoLimit : DEMO_UPLOAD_LIMIT;
+    const remaining = Math.min(limit, Math.max(0, demoUsage?.remaining ?? limit));
+    const used = Math.min(limit, Math.max(0, limit - remaining));
+    const progress = limit > 0 ? Math.round((used / limit) * 100) : 0;
+    const resetLabel = getDemoResetLabel ? getDemoResetLabel(demoUsage?.resetsOn ?? null) : null;
+
+    return {
+      limit,
+      remaining,
+      used,
+      progress,
+      resetLabel,
+    };
+  }, [demoUsage, effectiveDemoLimit, getDemoResetLabel, isDemoAccount]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (isOpen) {
+      const frame = requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    return undefined;
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!inputRef.current) return;
+    const element = inputRef.current;
+    element.style.height = 'auto';
+    element.style.minHeight = '3rem';
+    element.style.height = `${element.scrollHeight}px`;
+  }, [userInput, isOpen]);
 
   const toggleMessageExpansion = useCallback((id: string) => {
     setExpandedMessages(prev => {
@@ -910,6 +992,14 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }, []);
+
+  const handleSuggestedPrompt = useCallback((prompt: string) => {
+    setUserInput(prompt);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
+    });
   }, []);
   
   const handleSend = async () => {
@@ -954,7 +1044,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     }
 
     const guardDemoUsage = Boolean(isDemoAccount && (demoLimit ?? null) !== null);
-    const limitValue = demoLimit ?? DEMO_UPLOAD_LIMIT;
+    const limitValue = effectiveDemoLimit;
     let latestDemoSnapshot: DemoUsageSnapshot | null = demoUsage ?? null;
 
     const sendDemoLimitReached = (snapshot?: DemoUsageSnapshot | null) => {
@@ -1055,195 +1145,364 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     }
   };
 
+  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      handleSend();
+    }
+  };
+
   return (
     <>
       <button
+        type="button"
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 transition-transform transform hover:scale-110 z-30"
+        className="group fixed bottom-6 right-6 z-30 flex h-16 w-16 items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         aria-label="Abrir asistente de IA"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m12.728 12.728l-.707-.707M6.343 17.657l-.707.707M12 21a9 9 0 110-18 9 9 0 010 18z" /></svg>
+        <span className="absolute inset-0 -z-10 rounded-full bg-blue-500/40 blur-xl opacity-0 transition-opacity duration-300 group-hover:opacity-80" aria-hidden="true" />
+        <span className="relative flex h-full w-full items-center justify-center rounded-full bg-gradient-to-br from-blue-600 via-cyan-500 to-blue-700 text-white shadow-lg shadow-blue-900/30 transition-transform duration-300 group-hover:scale-105">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m12.728 12.728l-.707-.707M6.343 17.657l-.707.707M12 21a9 9 0 110-18 9 9 0 010 18z"
+            />
+          </svg>
+        </span>
       </button>
 
       {isOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black/50" onClick={() => setIsOpen(false)}></div>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col z-50">
-                <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 className="text-lg font-bold text-blue-600 dark:text-blue-400">Punto Limpio AI</h3>
-                    <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                </header>
-                <main className="flex-1 overflow-y-auto p-4 space-y-4">
-                    <div className="p-3 bg-blue-50 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 text-sm rounded-lg">
-                        <p className="font-bold mb-1">¡Hola! Soy tu asistente de inventario.</p>
-                        <p>Puedes preguntarme cosas como:</p>
-                        <ul className="list-disc list-inside mt-1">
-                            <li>¿Cuánto stock hay de Modulo Hex?</li>
-                            <li>¿Cuáles fueron los últimos 5 egresos?</li>
-                            <li>¿Qué artículos tienen stock bajo?</li>
-                        </ul>
+          <div
+            className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm animate-overlay-fade"
+            onClick={() => setIsOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative z-50 flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-900/30 backdrop-blur-xl animate-panel-in dark:border-slate-700/60 dark:bg-slate-900/90">
+            <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+              <div className="absolute -top-24 -left-20 h-64 w-64 rounded-full bg-blue-400/20 blur-3xl animate-soft-glow dark:bg-blue-500/15" />
+              <div className="absolute bottom-[-88px] right-[-60px] h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl animate-soft-glow [animation-delay:2s] dark:bg-cyan-400/15" />
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 via-transparent to-purple-500/10" />
+            </div>
+            <header className="relative z-10 flex items-center justify-between gap-4 border-b border-slate-200/60 bg-white/70 px-6 py-4 backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/50">
+              <div className="flex items-center gap-3">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-white shadow-lg">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-7 w-7"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.8}
+                      d="M12 6v6l4 2"
+                    />
+                  </svg>
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Punto Limpio AI</h3>
+                  <div className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-300">
+                    <span className={`h-2 w-2 rounded-full ${aiAvailable ? 'bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.25)]' : 'bg-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.25)]'}`} />
+                    <span>
+                      {aiAvailable
+                        ? 'Disponible para consultas en tiempo real'
+                        : 'Modo offline: usa las guías manuales'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {demoUsageSummary && (
+                  <div className="hidden sm:flex w-48 flex-col gap-1 rounded-2xl border border-blue-200/70 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 shadow-inner backdrop-blur dark:border-blue-500/40 dark:bg-blue-900/20 dark:text-blue-100">
+                    <div className="flex items-center justify-between font-semibold">
+                      <span>Demo IA</span>
+                      <span>
+                        {demoUsageSummary.remaining}/{demoUsageSummary.limit}
+                      </span>
                     </div>
-                    {(!aiAvailable || !canUseRemoteAnalysis('assistant')) && (
-                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-900/30 dark:text-red-200">
-                            <p className="font-semibold">Modo degradado</p>
-                            <p className="text-xs mt-1">
-                                {!aiAvailable
-                                    ? `La integración con ${providerLabel} no está configurada. Configura las credenciales correspondientes para habilitar el asistente.`
-                                    : 'La cuota remota está agotada. Usa el QR y la carga manual hasta el próximo reinicio o solicita un upgrade.'}
-                            </p>
-                        </div>
+                    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-blue-100/70 dark:bg-blue-900/40">
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-300"
+                        style={{ width: `${Math.min(100, Math.max(0, demoUsageSummary.progress))}%` }}
+                      />
+                    </div>
+                    {demoUsageSummary.resetLabel && (
+                      <span className="text-[10px] text-blue-600/80 dark:text-blue-200/80">
+                        Se reinicia {demoUsageSummary.resetLabel}
+                      </span>
                     )}
-                    {messages.map(msg => {
-                        const isUser = msg.sender === 'user';
-                        const bubbleTone = isUser
-                          ? 'bg-blue-600 text-white rounded-br-none'
-                          : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none';
-                        const isExpanded = msg.tableData ? expandedMessages.has(msg.id) : false;
-                        const rowsToRender = msg.tableData
-                          ? (isExpanded ? msg.tableData.allRows : msg.tableData.previewRows)
-                          : [];
-                        const hasMoreRows = msg.tableData
-                          ? msg.tableData.allRows.length > msg.tableData.previewRows.length
-                          : false;
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:bg-slate-800/80 dark:hover:text-white"
+                  aria-label="Cerrar asistente"
+                >
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </header>
 
-                        return (
-                          <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-md p-3 rounded-2xl ${bubbleTone}`}>
-                              {msg.tableData ? (
-                                <div className="space-y-3">
-                                  {msg.tableData.summaryBadges && msg.tableData.summaryBadges.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                      {msg.tableData.summaryBadges.map(badge => (
-                                        <span
-                                          key={`${msg.id}-${badge.label}`}
-                                          className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 px-3 py-1 text-xs font-semibold dark:bg-blue-900/40 dark:text-blue-200"
-                                        >
-                                          <span className="mr-1">{badge.label}:</span>
-                                          <span>{badge.value}</span>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
+            <main className="relative z-10 flex-1 space-y-6 overflow-y-auto px-6 py-6 [scrollbar-width:thin]">
+              <section className="rounded-3xl border border-blue-100/60 bg-gradient-to-br from-blue-50 via-indigo-50 to-cyan-50 p-5 text-sm text-slate-700 shadow-inner dark:border-blue-500/40 dark:from-slate-800/80 dark:via-slate-900/80 dark:to-slate-900/80 dark:text-slate-200">
+                <p className="text-sm font-semibold tracking-wide text-blue-800 dark:text-blue-200">Hola, soy tu asistente de inventario</p>
+                <p className="mt-1 text-sm">Podés preguntarme sobre niveles de stock, movimientos recientes o generar reportes inmediatos.</p>
+              </section>
 
-                                  <div>
-                                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{msg.tableData.title}</p>
-                                    {msg.tableData.caption && (
-                                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{msg.tableData.caption}</p>
-                                    )}
-                                  </div>
+              <section className="grid gap-3 sm:grid-cols-3" aria-label="Pulso del inventario">
+                <article className="group relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/60">
+                  <span className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br from-blue-500/20 via-transparent to-emerald-400/20 opacity-0 blur-xl transition duration-500 group-hover:opacity-100" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Stock disponible</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{formatNumber(Math.max(0, inventoryPulse.totalUnits))}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">Unidades actualmente en inventario</p>
+                </article>
 
-                                  {rowsToRender.length > 0 ? (
-                                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                                      <table className="min-w-full text-sm text-left">
-                                        <thead className="bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-100">
-                                          <tr>
-                                            {msg.tableData.columns.map((column, index) => (
-                                              <th
-                                                key={`${msg.id}-col-${index}`}
-                                                scope="col"
-                                                className="px-3 py-2 font-semibold uppercase tracking-wide text-xs"
+                <article className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/60">
+                  <span className="pointer-events-none absolute inset-x-4 -top-8 h-16 rounded-full bg-blue-500/20 blur-2xl" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Artículos activos</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{formatNumber(inventoryPulse.activeItems)}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">{inventoryPulse.lowStockCount} en alerta (≤ {inventoryPulse.lowStockThreshold} u.)</p>
+                </article>
+
+                <article className="relative overflow-hidden rounded-2xl border border-blue-200/60 bg-gradient-to-br from-blue-500/10 via-sky-500/5 to-indigo-500/10 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-blue-500/40 dark:from-blue-900/30 dark:via-slate-900/30 dark:to-indigo-900/30">
+                  <span className="pointer-events-none absolute -right-12 top-1/2 h-28 w-28 -translate-y-1/2 rounded-full bg-blue-500/20 blur-3xl" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-200">Último movimiento</p>
+                  <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">{inventoryPulse.lastMovementLabel}</p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Actualizado automáticamente con las últimas cargas</p>
+                </article>
+              </section>
+
+              <section className="space-y-3" aria-label="Sugerencias rápidas">
+                <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Sugerencias inteligentes</h4>
+                <div className="flex flex-wrap gap-2">
+                  {SUGGESTED_PROMPTS.map((item, index) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => handleSuggestedPrompt(item.prompt)}
+                      title={item.prompt}
+                      className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-700/70 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:border-blue-400 dark:hover:bg-blue-500/20 dark:hover:text-blue-100 animate-chip-enter"
+                      style={{ animationDelay: `${index * 80}ms` }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500 transition group-hover:bg-blue-600 dark:bg-blue-300" />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {(!aiAvailable || !canUseRemoteAnalysis('assistant')) && (
+                <section className="rounded-2xl border border-amber-200/80 bg-amber-50/90 p-4 text-sm text-amber-800 shadow-sm dark:border-amber-500/50 dark:bg-amber-900/30 dark:text-amber-100">
+                  <p className="font-semibold">Modo degradado</p>
+                  <p className="mt-1 text-xs leading-relaxed">
+                    {!aiAvailable
+                      ? `La integración con ${providerLabel} no está configurada. Configurá las credenciales correspondientes para habilitar el asistente.`
+                      : 'La cuota remota se agotó. Usá el QR y la carga manual hasta el próximo reinicio o solicitá un upgrade.'}
+                  </p>
+                </section>
+              )}
+
+              <section className="space-y-4" aria-live="polite">
+                {messages.map(msg => {
+                  const isUser = msg.sender === 'user';
+                  const bubbleTone = isUser
+                    ? 'bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 text-white ring-blue-400/30'
+                    : 'bg-white/85 text-slate-900 ring-slate-200/70 backdrop-blur-sm dark:bg-slate-800/80 dark:text-slate-100 dark:ring-slate-700/70';
+                  const isExpanded = msg.tableData ? expandedMessages.has(msg.id) : false;
+                  const rowsToRender = msg.tableData
+                    ? isExpanded
+                      ? msg.tableData.allRows
+                      : msg.tableData.previewRows
+                    : [];
+                  const hasMoreRows = Boolean(
+                    msg.tableData && msg.tableData.allRows.length > msg.tableData.previewRows.length
+                  );
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-message-entry`}
+                    >
+                      <div className="group relative max-w-xl">
+                        <span
+                          className={`pointer-events-none absolute -inset-1 rounded-[28px] opacity-0 blur-lg transition duration-500 group-hover:opacity-100 ${
+                            isUser
+                              ? 'bg-gradient-to-br from-blue-500/50 via-cyan-400/30 to-transparent'
+                              : 'bg-gradient-to-br from-slate-400/30 via-blue-500/20 to-transparent'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <div
+                          className={`relative overflow-hidden rounded-3xl px-5 py-4 text-sm leading-relaxed shadow-lg ring-1 ring-inset transition-all duration-300 ${bubbleTone}`}
+                        >
+                          {msg.tableData ? (
+                            <div className="space-y-4">
+                              {msg.tableData.summaryBadges && msg.tableData.summaryBadges.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {msg.tableData.summaryBadges.map(badge => (
+                                    <span
+                                      key={`${msg.id}-${badge.label}`}
+                                      className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur group-hover:bg-white/30 dark:bg-slate-900/30"
+                                    >
+                                      <span className="text-xs uppercase tracking-wider opacity-75">{badge.label}</span>
+                                      <span className="text-sm font-bold">{badge.value}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">{msg.tableData.title}</p>
+                                {msg.tableData.caption && (
+                                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{msg.tableData.caption}</p>
+                                )}
+                              </div>
+
+                              {rowsToRender.length > 0 ? (
+                                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
+                                  <table className="min-w-full text-sm text-left">
+                                    <thead className="bg-slate-100/80 text-slate-600 dark:bg-slate-800/80 dark:text-slate-100">
+                                      <tr>
+                                        {msg.tableData.columns.map((column, index) => (
+                                          <th
+                                            key={`${msg.id}-col-${index}`}
+                                            scope="col"
+                                            className="px-4 py-2 text-xs font-semibold uppercase tracking-wide"
+                                          >
+                                            {column}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200/70 text-slate-700 dark:divide-slate-700/60 dark:text-slate-100">
+                                      {rowsToRender.map((row, rowIndex) => (
+                                        <tr key={`${msg.id}-row-${rowIndex}`}>
+                                          {row.map((cell, cellIndex) => {
+                                            const isNumeric = msg.tableData?.numericColumnIndexes?.includes(cellIndex);
+                                            const alignment = isNumeric ? 'text-right' : 'text-left';
+                                            const padding = cellIndex === row.length - 1 ? 'py-2 pl-4 pr-5' : 'py-2 px-4';
+                                            const emphasis = cellIndex === 0 ? 'font-medium text-slate-900 dark:text-white' : '';
+                                            return (
+                                              <td
+                                                key={`${msg.id}-cell-${rowIndex}-${cellIndex}`}
+                                                className={`${padding} ${alignment} ${emphasis}`}
                                               >
-                                                {column}
-                                              </th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody className="text-gray-700 dark:text-gray-100">
-                                          {rowsToRender.map((row, rowIndex) => (
-                                            <tr
-                                              key={`${msg.id}-row-${rowIndex}`}
-                                              className="border-b border-gray-200 dark:border-gray-700"
-                                            >
-                                              {row.map((cell, cellIndex) => {
-                                                const isNumeric = msg.tableData?.numericColumnIndexes?.includes(cellIndex);
-                                                const alignment = isNumeric ? 'text-right' : 'text-left';
-                                                const padding = cellIndex === row.length - 1 ? 'py-2 pl-3 pr-4' : 'py-2 px-3';
-                                                const emphasis = cellIndex === 0 ? 'font-medium' : '';
-                                                return (
-                                                  <td
-                                                    key={`${msg.id}-cell-${rowIndex}-${cellIndex}`}
-                                                    className={`${padding} ${alignment} ${emphasis}`}
-                                                  >
-                                                    {cell}
-                                                  </td>
-                                                );
-                                              })}
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">No hay registros para mostrar.</p>
-                                  )}
-
-                                  <div className="flex flex-wrap gap-2 text-xs text-blue-700 dark:text-blue-300">
-                                    {hasMoreRows && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleMessageExpansion(msg.id)}
-                                        className="inline-flex items-center rounded-full border border-blue-200 px-3 py-1 font-semibold hover:bg-blue-50 dark:border-blue-500/50 dark:hover:bg-blue-500/10"
-                                      >
-                                        {isExpanded
-                                          ? 'Ver menos'
-                                          : `Ver todo (${msg.tableData.allRows.length})`}
-                                      </button>
-                                    )}
-                                    {msg.tableData.allRows.length > 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleExportCsv(msg.tableData!)}
-                                        className="inline-flex items-center rounded-full border border-blue-200 px-3 py-1 font-semibold hover:bg-blue-50 dark:border-blue-500/50 dark:hover:bg-blue-500/10"
-                                      >
-                                        Exportar CSV
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {msg.footnote && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">{msg.footnote}</p>
-                                  )}
+                                                {cell}
+                                              </td>
+                                            );
+                                          })}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 </div>
                               ) : (
-                                <div
-                                  className="prose prose-sm dark:prose-invert"
-                                  dangerouslySetInnerHTML={{
-                                    __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
-                                  }}
-                                />
+                                <p className="text-sm text-slate-600 dark:text-slate-300">No hay registros para mostrar.</p>
+                              )}
+
+                              <div className="flex flex-wrap gap-2 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                                {hasMoreRows && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMessageExpansion(msg.id)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
+                                  >
+                                    {isExpanded ? 'Ver menos' : `Ver todo (${msg.tableData.allRows.length})`}
+                                  </button>
+                                )}
+                                {msg.tableData.allRows.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleExportCsv(msg.tableData!)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
+                                  >
+                                    Exportar CSV
+                                  </button>
+                                )}
+                              </div>
+
+                              {msg.footnote && (
+                                <p className="text-xs text-slate-500 dark:text-slate-300">{msg.footnote}</p>
                               )}
                             </div>
-                          </div>
-                        );
-                    })}
-                    {isLoading && (
-                        <div className="flex justify-start">
-                             <div className="max-w-md p-3 rounded-2xl bg-gray-200 dark:bg-gray-700 rounded-bl-none">
-                                <Spinner />
-                             </div>
+                          ) : (
+                            <div
+                              className="prose prose-sm dark:prose-invert"
+                              dangerouslySetInnerHTML={{
+                                __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
+                              }}
+                            />
+                          )}
                         </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </main>
-                <footer className="p-4 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center space-x-2">
-                        <input
-                            type="text"
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                            placeholder="Escribe tu pregunta..."
-                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500"
-                            disabled={isLoading || !aiAvailable}
-                        />
-                        <button onClick={handleSend} disabled={isLoading || !userInput.trim() || !aiAvailable} className="bg-blue-600 text-white rounded-lg p-3 disabled:bg-blue-400">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                        </button>
+                      </div>
                     </div>
-                </footer>
-            </div>
+                  );
+                })}
+
+                {isLoading && (
+                  <div className="flex justify-start animate-message-entry">
+                    <div className="max-w-[60%] rounded-3xl bg-white/80 px-5 py-3 text-slate-500 shadow-inner ring-1 ring-slate-200/60 backdrop-blur dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-700/60">
+                      <div className="flex items-center gap-2">
+                        <span className="typing-indicator-dot" />
+                        <span className="typing-indicator-dot animation-delay-200" />
+                        <span className="typing-indicator-dot animation-delay-400" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </section>
+            </main>
+
+            <footer className="relative z-10 border-t border-slate-200/60 bg-white/70 px-6 py-4 backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/50">
+              <div className="flex items-end gap-3">
+                <div className="relative flex-1">
+                  <textarea
+                    ref={inputRef}
+                    rows={1}
+                    value={userInput}
+                    onChange={event => setUserInput(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder="Escribí tu consulta... (Enter para enviar, Shift+Enter para una nueva línea)"
+                    className="min-h-[3rem] w-full resize-none rounded-2xl border border-slate-200/70 bg-white/90 px-4 py-3 text-sm text-slate-800 shadow-inner transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 dark:border-slate-700/70 dark:bg-slate-800/80 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
+                    disabled={isLoading || !aiAvailable}
+                    aria-label="Escribe tu consulta para el asistente"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={isLoading || !userInput.trim() || !aiAvailable}
+                  className="group relative inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-500 text-white shadow-lg shadow-blue-900/30 transition-all duration-200 hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-label="Enviar mensaje"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                </button>
+              </div>
+            </footer>
+          </div>
         </div>
       )}
     </>
