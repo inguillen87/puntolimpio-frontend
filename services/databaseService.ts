@@ -1,4 +1,4 @@
-import { collection, getDocs, writeBatch, doc, deleteDoc, updateDoc, addDoc, query, where, getDoc, setDoc, getCountFromServer } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, deleteDoc, updateDoc, addDoc, query, where, getDoc, setDoc, limit } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db } from '../firebaseConfig'; // Importa la configuración de Firebase
 import { Item, Transaction, ControlRecord, Location, Organization, User, UserRole, Invitation, UserOrInvitation, DailyUsage, Partner, PartnerType } from '../types';
@@ -76,8 +76,8 @@ export const findUserInvitationByEmail = async (email: string): Promise<Invitati
 }
 
 export const hasAnyUsers = async (): Promise<boolean> => {
-    const usersCountSnapshot = await getCountFromServer(collection(db, USERS_COLLECTION));
-    return usersCountSnapshot.data().count > 0;
+    const usersSnapshot = await getDocs(query(collection(db, USERS_COLLECTION), limit(1)));
+    return !usersSnapshot.empty;
 }
 
 export const inviteUserToOrganization = async (organizationId: string, email: string, role: UserRole): Promise<void> => {
@@ -132,8 +132,8 @@ export const getOrCreateUserProfile = async (uid: string, email: string): Promis
     }
     
      // Special case: Auto-promote the very first user to SUPER_ADMIN
-    const allUsersSnapshot = await getCountFromServer(collection(db, USERS_COLLECTION));
-    if (allUsersSnapshot.data().count === 0) {
+    const existingUsersSnapshot = await getDocs(query(collection(db, USERS_COLLECTION), limit(1)));
+    if (existingUsersSnapshot.empty) {
         console.log("First user detected. Promoting to SUPER_ADMIN.");
         const batch = writeBatch(db);
 
