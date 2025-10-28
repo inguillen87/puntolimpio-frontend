@@ -30,10 +30,16 @@ let mockAuthListener: ((user: FirebaseUser | null) => void) | null = null;
 let mockCurrentUser: FirebaseUser | null = null;
 
 export const registerUser = async (email: string, password: string) => {
+    const normalizedEmail = email.toLowerCase();
+
     if (!isFirebaseConfigured) {
         // Mock registration logic
-        const invitation = await db.findUserInvitationByEmail(email);
-        if (!invitation) throw new Error("Este correo no ha sido invitado.");
+        const invitation = await db.findUserInvitationByEmail(normalizedEmail);
+        if (!invitation) {
+            const invitationError: any = new Error("Necesitás una invitación para crear una cuenta.");
+            invitationError.code = 'invitation/required';
+            throw invitationError;
+        }
 
         const newUid = `mock-uid-${Date.now()}`;
         // The profile will be created on first login via getOrCreateUserProfile in the mock service
@@ -43,11 +49,21 @@ export const registerUser = async (email: string, password: string) => {
     // Real Firebase registration
     if (!auth) throw new Error("Firebase Auth no está inicializado.");
 
+    const hasExistingUsers = await db.hasAnyUsers();
+    if (hasExistingUsers) {
+        const invitation = await db.findUserInvitationByEmail(normalizedEmail);
+        if (!invitation) {
+            const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
+            invitationError.code = 'invitation/required';
+            throw invitationError;
+        }
+    }
+
     try {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
 
         try {
-            const profileResult = await db.getOrCreateUserProfile(userCredential.user.uid, email);
+            const profileResult = await db.getOrCreateUserProfile(userCredential.user.uid, normalizedEmail);
             if (!profileResult) {
                 await deleteUser(userCredential.user);
                 const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
