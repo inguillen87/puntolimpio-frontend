@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Item, Transaction, Partner, TransactionType } from '../types';
 import {
   getAiAssistantResponse,
@@ -23,11 +23,32 @@ interface AiAssistantProps {
   getDemoResetLabel?: (isoDate?: string | null) => string;
 }
 
+interface SummaryBadge {
+  label: string;
+  value: string;
+}
+
+interface TableData {
+  title: string;
+  caption?: string;
+  columns: string[];
+  previewRows: string[][];
+  allRows: string[][];
+  csvFileName: string;
+  summaryBadges?: SummaryBadge[];
+  numericColumnIndexes?: number[];
+}
+
 interface Message {
+  id: string;
   sender: 'user' | 'ai';
   content: string;
   decoratedHtml?: string;
+  tableData?: TableData;
+  footnote?: string;
 }
+
+type AssistantMessagePayload = Omit<Message, 'id' | 'sender'>;
 
 interface KnowledgeBase {
   contextJson: string;
@@ -60,6 +81,98 @@ const MAX_MEMORY_TURNS = 8;
 const MAX_SUMMARY_LENGTH = 1400;
 
 const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const buildMarkdownTable = (headers: string[], rows: string[][]): string => {
+  if (rows.length === 0) {
+    return '';
+  }
+
+  const headerLine = `| ${headers.join(' | ')} |`;
+  const separator = `| ${headers.map(() => '---').join(' | ')} |`;
+  const body = rows.map(row => `| ${row.join(' | ')} |`);
+  return [headerLine, separator, ...body].join('\n');
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const buildHtmlTable = (
+  headers: string[],
+  rows: string[][],
+  numericColumnIndexes: number[] = []
+): string => {
+  if (rows.length === 0) {
+    return '<p class="text-sm text-gray-600 dark:text-gray-300">No hay datos disponibles.</p>';
+  }
+
+  const headerHtml = headers
+    .map(
+      header =>
+        `<th scope="col" class="px-3 py-2 font-semibold uppercase tracking-wide text-xs">${escapeHtml(header)}</th>`
+    )
+    .join('');
+
+  const bodyHtml = rows
+    .map(row => {
+      const cells = row
+        .map((value, index) => {
+          const alignmentClass = numericColumnIndexes.includes(index) ? 'text-right' : 'text-left';
+          const basePadding = index === row.length - 1 ? 'py-1 pl-3 pr-2' : 'py-1 pr-3';
+          const emphasis = index === 0 ? 'font-medium' : '';
+          return `<td class="${basePadding} ${alignmentClass} ${emphasis}">${escapeHtml(value)}</td>`;
+        })
+        .join('');
+      return `<tr class="border-b border-gray-200 dark:border-gray-700">${cells}</tr>`;
+    })
+    .join('');
+
+  return `
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-100">
+          <tr>${headerHtml}</tr>
+        </thead>
+        <tbody class="text-gray-700 dark:text-gray-100">
+          ${bodyHtml}
+        </tbody>
+      </table>
+    </div>
+  `.trim();
+};
+
+const formatNumber = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return String(value);
+  }
+  return new Intl.NumberFormat('es-AR').format(value);
+};
+
+const buildCsvFilename = (base: string): string => {
+  const slug = sanitizeForSearch(base) || 'reporte';
+  const date = new Date().toISOString().slice(0, 10);
+  return `${slug}-${date}.csv`;
+};
+
+const detectNumericColumns = (headers: string[]): number[] =>
+  headers.reduce<number[]>((acc, header, index) => {
+    if (/(cantidad|unidad|units|total|docs)/i.test(header)) {
+      acc.push(index);
+    }
+    return acc;
+  }, []);
+
+const createMessageId = (() => {
+  let counter = 0;
+  return () => {
+    counter += 1;
+    return `msg-${Date.now()}-${counter}`;
+  };
+})();
 
 const mapMessagesToTurns = (messages: Message[]): AssistantConversationTurn[] =>
   messages.map(message => ({
@@ -112,22 +225,26 @@ const summarizeConversation = (messages: Message[]): string => {
 };
 
 const decorateAssistantResponse = (
-  baseResponse: string,
+  payload: AssistantMessagePayload,
   snapshot: DemoUsageSnapshot | null,
   limitValue: number,
   getDemoResetLabel?: (isoDate?: string | null) => string
-): { content: string; decoratedHtml?: string } => {
+): AssistantMessagePayload => {
   if (!snapshot) {
-    return { content: baseResponse };
+    return payload;
   }
 
   const remaining = Math.max(snapshot.remaining, 0);
   const resetLabel = getDemoResetLabel ? getDemoResetLabel(snapshot.resetsOn) : 'el próximo ciclo';
   const footnote = `Demo: te quedan ${remaining} de ${limitValue} interacciones de IA hasta ${resetLabel}.`;
+  const baseHtml = payload.decoratedHtml ?? payload.content.replace(/\n/g, '<br />');
 
   return {
-    content: `${baseResponse}\n\n${footnote}`,
-    decoratedHtml: `${baseResponse}\n\n<span class="text-xs text-gray-500">${footnote}</span>`,
+    ...payload,
+    decoratedHtml: payload.tableData
+      ? payload.decoratedHtml
+      : `${baseHtml}<br /><span class="text-xs text-gray-500">${escapeHtml(footnote)}</span>`,
+    footnote,
   };
 };
 
@@ -145,20 +262,188 @@ const buildCacheKey = (
   return `${signature}::${historySignature}::${sanitizeForSearch(question)}`;
 };
 
-const formatTransactionsTable = (
-  records: Transaction[],
-  knowledge: KnowledgeBase,
-  limit: number
-): { text: string; html: string } => {
-  if (records.length === 0) {
+const interpretAssistantResponse = (raw: string): AssistantMessagePayload => {
+  const trimmed = raw.trim();
+  if (!trimmed) {
     return {
-      text: 'No hay transacciones registradas.',
-      html: '<p class="text-sm text-gray-600 dark:text-gray-300">No hay transacciones registradas.</p>',
+      content: 'No obtuve una respuesta del modelo.',
+      decoratedHtml:
+        '<p class="text-sm text-gray-700 dark:text-gray-200">No obtuve una respuesta del modelo.</p>',
     };
   }
 
+  try {
+    const data = JSON.parse(trimmed);
+    if (data && typeof data === 'object') {
+      const columns: string[] = Array.isArray((data as any).columns) && (data as any).columns.length
+        ? (data as any).columns.map((col: unknown) => String(col))
+        : ['Fecha', 'Detalle', 'Cantidad', 'Destino'];
+
+      const rawRows: any[] = Array.isArray((data as any).rows) ? (data as any).rows : [];
+      const normalizedRows = rawRows
+        .map(row => {
+          if (Array.isArray(row)) {
+            const values = row.map(value => (value === null || value === undefined ? '' : String(value)));
+            const padded = values.length >= columns.length
+              ? values.slice(0, columns.length)
+              : [...values, ...Array(columns.length - values.length).fill('')];
+            return { values: padded, quantity: null as number | null };
+          }
+          if (row && typeof row === 'object') {
+            const getValue = (keys: string[], fallback = '') => {
+              for (const key of keys) {
+                if (key in row && row[key] !== undefined && row[key] !== null) {
+                  return row[key];
+                }
+              }
+              return fallback;
+            };
+
+            const rawDate = getValue(['date', 'fecha', 'day'], '');
+            const rawItem = getValue(['item', 'article', 'articulo', 'product', 'producto', 'detalle', 'detail', 'name'], '');
+            const rawQuantity = getValue(['quantity', 'qty', 'cantidad', 'units', 'unidades'], '');
+            const rawDestination = getValue(['destination', 'destino', 'partner', 'cliente', 'customer'], '');
+
+            const quantityNumber = Number(rawQuantity);
+            const quantityLabel = Number.isFinite(quantityNumber)
+              ? formatNumber(quantityNumber)
+              : rawQuantity === null || rawQuantity === undefined
+                ? ''
+                : String(rawQuantity);
+
+            return {
+              values: [String(rawDate ?? ''), String(rawItem ?? ''), quantityLabel, String(rawDestination ?? '')],
+              quantity: Number.isFinite(quantityNumber) ? quantityNumber : null,
+            };
+          }
+          return { values: [String(row ?? '')], quantity: null };
+        })
+        .map(entry => {
+          if (entry.values.length >= columns.length) {
+            return { ...entry, values: entry.values.slice(0, columns.length) };
+          }
+          return {
+            ...entry,
+            values: [...entry.values, ...Array(columns.length - entry.values.length).fill('')],
+          };
+        });
+
+      const allRows = normalizedRows.map(entry => entry.values);
+      const previewLimitRaw = typeof (data as any).previewLimit === 'number' ? (data as any).previewLimit : undefined;
+      const previewLimit = previewLimitRaw && Number.isFinite(previewLimitRaw)
+        ? Math.max(1, Math.min(Math.floor(previewLimitRaw), allRows.length || 5, 20))
+        : Math.min(5, allRows.length || 5);
+      const previewRows = allRows.slice(0, previewLimit);
+
+      const docsValue = typeof (data as any).docs === 'number' ? (data as any).docs : allRows.length;
+      const unitsValue = typeof (data as any).units === 'number'
+        ? (data as any).units
+        : (() => {
+            const quantities = normalizedRows.map(entry => entry.quantity).filter(value => value !== null) as number[];
+            if (quantities.length === 0) return null;
+            return quantities.reduce((sum, value) => sum + value, 0);
+          })();
+
+      const summaryTextRaw = typeof (data as any).summary === 'string' ? (data as any).summary.trim() : '';
+      const titleRaw = typeof (data as any).title === 'string' ? (data as any).title.trim() : '';
+      const summaryText = summaryTextRaw
+        ? summaryTextRaw
+        : `Resumen: ${formatNumber(docsValue)} movimientos${
+            typeof unitsValue === 'number' ? ` · ${formatNumber(unitsValue)} unidades` : ''
+          }.`;
+      const tableMarkdown = previewRows.length ? buildMarkdownTable(columns, previewRows) : '';
+      const htmlTable = previewRows.length ? buildHtmlTable(columns, previewRows, detectNumericColumns(columns)) : '';
+
+      const captionRaw =
+        typeof (data as any).caption === 'string'
+          ? (data as any).caption.trim()
+          : typeof (data as any).subtitle === 'string'
+            ? (data as any).subtitle.trim()
+            : '';
+      const hasMore = allRows.length > previewRows.length;
+      const caption = captionRaw || (hasMore ? `Mostrando ${previewRows.length} de ${allRows.length} registros.` : undefined);
+
+      const csvNameRaw =
+        typeof (data as any).csvFileName === 'string' && (data as any).csvFileName.trim()
+          ? (data as any).csvFileName
+          : typeof (data as any).csvName === 'string' && (data as any).csvName.trim()
+            ? (data as any).csvName
+            : titleRaw || summaryText;
+
+      const numericColumnIndexesRaw = Array.isArray((data as any).numericColumns)
+        ? (data as any).numericColumns
+        : [];
+      const numericColumnIndexes = Array.isArray(numericColumnIndexesRaw)
+        ? numericColumnIndexesRaw
+            .map((entry: unknown) => {
+              if (typeof entry === 'number' && Number.isFinite(entry)) return Math.max(0, Math.floor(entry));
+              if (typeof entry === 'string') {
+                const index = columns.findIndex(col => col.toLowerCase() === entry.toLowerCase());
+                if (index >= 0) return index;
+              }
+              return null;
+            })
+            .filter((value): value is number => value !== null)
+        : detectNumericColumns(columns);
+
+      const tableData: TableData | undefined = allRows.length
+        ? {
+            title: titleRaw || summaryText,
+            caption,
+            columns,
+            previewRows,
+            allRows,
+            csvFileName: buildCsvFilename(csvNameRaw || 'respuesta_asistente'),
+            summaryBadges: [
+              { label: 'Movimientos', value: formatNumber(docsValue) },
+              ...(typeof unitsValue === 'number'
+                ? [{ label: 'Unidades', value: formatNumber(unitsValue) }]
+                : []),
+            ],
+            numericColumnIndexes,
+          }
+        : undefined;
+
+      const content = tableMarkdown ? `${summaryText}\n\n${tableMarkdown}` : summaryText;
+      const decoratedHtml = htmlTable
+        ? `
+          <div class="space-y-3">
+            <p class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(summaryText)}</p>
+            ${htmlTable}
+          </div>
+        `.trim()
+        : `<p class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(summaryText)}</p>`;
+
+      return {
+        content,
+        decoratedHtml,
+        tableData,
+      };
+    }
+  } catch (error) {
+    // Not JSON, fall through to plain text handling.
+  }
+
+  return {
+    content: trimmed,
+    decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(trimmed).replace(/\n/g, '<br />')}</p>`,
+  };
+};
+
+const formatTransactionsTable = (
+  records: Transaction[],
+  knowledge: KnowledgeBase,
+  previewLimit: number
+): {
+  text: string;
+  html: string;
+  columns: string[];
+  previewRows: string[][];
+  allRows: string[][];
+} => {
   const headers = ['Fecha', 'Artículo', 'Cantidad', 'Destino'];
-  const rows = records.slice(0, limit).map(tx => {
+
+  const allRows = records.map(tx => {
     const item = knowledge.itemsById.get(tx.itemId);
     const partner = tx.partnerId ? knowledge.partnersById.get(tx.partnerId) : undefined;
     const destination = partner
@@ -166,47 +451,37 @@ const formatTransactionsTable = (
       : tx.destination
         ? normalizePartnerName(tx.destination)
         : 'Sin destino';
-    return {
-      date: formatDate(tx.createdAt),
-      itemName: item?.name ?? 'Artículo desconocido',
-      quantity: tx.quantity,
+    const quantityLabel = formatNumber(tx.quantity);
+    return [
+      formatDate(tx.createdAt),
+      item?.name ?? 'Artículo desconocido',
+      quantityLabel,
       destination,
-    };
+    ];
   });
 
-  const textRows = rows.map(row => `| ${row.date} | ${row.itemName} | ${row.quantity} | ${row.destination} |`);
-  const text = ['| Fecha | Artículo | Cantidad | Destino |', '| --- | --- | --- | --- |', ...textRows].join('\n');
+  const previewRows = allRows.slice(0, previewLimit);
 
-  const htmlRows = rows
-    .map(
-      row =>
-        `<tr class="border-b border-gray-200 dark:border-gray-700"><td class="py-1 pr-3 font-medium">${row.date}</td><td class="py-1 pr-3">${row.itemName}</td><td class="py-1 pr-3 text-right">${row.quantity}</td><td class="py-1">${row.destination}</td></tr>`
-    )
-    .join('');
-  const html = `
-    <div class="overflow-x-auto">
-      <table class="min-w-full text-sm text-left">
-        <thead class="bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-100">
-          <tr>
-            ${headers
-              .map(header => `<th scope="col" class="px-3 py-2 font-semibold uppercase tracking-wide text-xs">${header}</th>`)
-              .join('')}
-          </tr>
-        </thead>
-        <tbody class="text-gray-700 dark:text-gray-100">
-          ${htmlRows}
-        </tbody>
-      </table>
-    </div>
-  `.trim();
+  if (allRows.length === 0) {
+    return {
+      text: 'No hay transacciones registradas.',
+      html: '<p class="text-sm text-gray-600 dark:text-gray-300">No hay transacciones registradas.</p>',
+      columns: headers,
+      previewRows,
+      allRows,
+    };
+  }
 
-  return { text, html };
+  const text = buildMarkdownTable(headers, previewRows);
+  const html = buildHtmlTable(headers, previewRows, [2]);
+
+  return { text, html, columns: headers, previewRows, allRows };
 };
 
 const summarizePartnerActivity = (
   partnerQuery: string,
   knowledge: KnowledgeBase
-): { content: string; decoratedHtml?: string } | null => {
+): AssistantMessagePayload | null => {
   const sanitizedQuery = sanitizeForSearch(partnerQuery);
   const match = knowledge.partnerSearchIndex.find(entry =>
     sanitizedQuery.includes(entry.search) || entry.search.includes(sanitizedQuery)
@@ -233,24 +508,49 @@ const summarizePartnerActivity = (
       decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
     };
   }
+
   const totalUnits = related.reduce((sum, tx) => sum + tx.quantity, 0);
-  const table = formatTransactionsTable(related, knowledge, Math.min(related.length, 5));
-  const header = `Resumen para ${normalizedName}: ${related.length} entregas registradas, ${totalUnits} unidades en total.`;
+  const previewLimit = Math.min(related.length, 5);
+  const table = formatTransactionsTable(related, knowledge, previewLimit);
+
+  const header = `Resumen para ${normalizedName}: ${related.length} entregas registradas, ${formatNumber(totalUnits)} unidades en total.`;
+  const hasMoreRows = table.allRows.length > table.previewRows.length;
+  const caption = hasMoreRows
+    ? `Mostrando ${table.previewRows.length} de ${table.allRows.length} movimientos.`
+    : undefined;
+
+  const tableData: TableData | undefined = table.previewRows.length
+    ? {
+        title: `Entregas a ${normalizedName}`,
+        caption,
+        columns: table.columns,
+        previewRows: table.previewRows,
+        allRows: table.allRows,
+        csvFileName: buildCsvFilename(`entregas_${normalizedName}`),
+        summaryBadges: [
+          { label: 'Entregas', value: formatNumber(related.length) },
+          { label: 'Unidades', value: formatNumber(totalUnits) },
+        ],
+        numericColumnIndexes: [2],
+      }
+    : undefined;
+
   return {
-    content: `${header}\n\n${table.text}`,
+    content: table.previewRows.length ? `${header}\n\n${table.text}` : header,
     decoratedHtml: `
       <div class="space-y-3">
-        <p class="text-sm text-gray-700 dark:text-gray-200"><strong>Resumen para ${normalizedName}</strong>: ${related.length} entregas registradas, ${totalUnits} unidades en total.</p>
-        ${table.html}
+        <p class="text-sm text-gray-700 dark:text-gray-200"><strong>Resumen para ${normalizedName}</strong>: ${formatNumber(related.length)} entregas registradas, ${formatNumber(totalUnits)} unidades en total.</p>
+        ${table.previewRows.length ? table.html : ''}
       </div>
     `.trim(),
+    tableData,
   };
 };
 
 const resolveLocalAnswer = (
   question: string,
   knowledge: KnowledgeBase
-): { content: string; decoratedHtml?: string } | null => {
+): AssistantMessagePayload | null => {
   const trimmedQuestion = question.trim();
   if (!trimmedQuestion) return null;
 
@@ -276,34 +576,75 @@ const resolveLocalAnswer = (
 
   if (maybeItem && /stock|inventario|quedo|hay/.test(lowerQuestion)) {
     const stock = knowledge.stockByItemId.get(maybeItem.item.id) ?? 0;
-    const content = `Stock disponible de ${maybeItem.item.name}: ${stock} unidad${stock === 1 ? '' : 'es'}.`;
+    const content = `Stock disponible de ${maybeItem.item.name}: ${formatNumber(stock)} unidad${stock === 1 ? '' : 'es'}.`;
     return {
       content,
-      decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200"><strong>${maybeItem.item.name}</strong>: ${stock} unidad${stock === 1 ? '' : 'es'} disponibles en inventario.</p>`,
+      decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200"><strong>${escapeHtml(
+        maybeItem.item.name
+      )}</strong>: ${formatNumber(stock)} unidad${stock === 1 ? '' : 'es'} disponibles en inventario.</p>`,
     };
   }
 
   if (/(egreso|venta)/.test(lowerQuestion)) {
     if (/ultimo|último|ultimas|últimas|ultimos|últimos/.test(lowerQuestion)) {
       const limitMatch = lowerQuestion.match(/(\d{1,2})/);
-      const limit = limitMatch ? Math.min(parseInt(limitMatch[1], 10), 20) : 5;
+      const limit = limitMatch ? Math.max(1, Math.min(parseInt(limitMatch[1], 10), 20)) : 5;
+
+      if (knowledge.outcomesSorted.length === 0) {
+        const message = 'No hay salidas registradas.';
+        return {
+          content: message,
+          decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${message}</p>`,
+        };
+      }
+
       const table = formatTransactionsTable(knowledge.outcomesSorted, knowledge, limit);
+      if (!table.previewRows.length) {
+        const message = 'No hay salidas registradas.';
+        return {
+          content: message,
+          decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${message}</p>`,
+        };
+      }
+
       const { docs, totalUnits } = formatTotals(knowledge.outcomesSorted.slice(0, limit));
-      const intro = `Últimas ${docs} salidas registradas (${totalUnits} unidades en total):`;
+      const intro = `Últimas ${formatNumber(docs)} salidas registradas (${formatNumber(totalUnits)} unidades en total):`;
+      const hasMore = table.allRows.length > table.previewRows.length;
+      const caption = hasMore
+        ? `Mostrando ${table.previewRows.length} de ${table.allRows.length} movimientos.`
+        : undefined;
+
+      const tableData: TableData = {
+        title: 'Últimas salidas registradas',
+        caption,
+        columns: table.columns,
+        previewRows: table.previewRows,
+        allRows: table.allRows,
+        csvFileName: buildCsvFilename('salidas_recientes'),
+        summaryBadges: [
+          { label: 'Movimientos', value: formatNumber(docs) },
+          { label: 'Unidades', value: formatNumber(totalUnits) },
+        ],
+        numericColumnIndexes: [2],
+      };
+
       return {
-        content: `${intro}\n\n${table.text}`,
+        content: table.text ? `${intro}\n\n${table.text}` : intro,
         decoratedHtml: `
           <div class="space-y-3">
-            <p class="text-sm text-gray-700 dark:text-gray-200">${intro}</p>
+            <p class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(intro)}</p>
             ${table.html}
           </div>
         `.trim(),
+        tableData,
       };
     }
 
     if (/cu[aá]nt/.test(lowerQuestion) || /total/.test(lowerQuestion)) {
       const { docs, totalUnits } = formatTotals(knowledge.outcomesSorted);
-      const content = `Se registraron ${docs} salidas recientes por un total de ${totalUnits} unidades.`;
+      const content = `Se registraron ${formatNumber(docs)} salidas recientes por un total de ${formatNumber(
+        totalUnits
+      )} unidades.`;
       return {
         content,
         decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
@@ -314,24 +655,63 @@ const resolveLocalAnswer = (
   if (/(ingreso|compra)/.test(lowerQuestion)) {
     if (/ultimo|último|ultimas|últimas|ultimos|últimos/.test(lowerQuestion)) {
       const limitMatch = lowerQuestion.match(/(\d{1,2})/);
-      const limit = limitMatch ? Math.min(parseInt(limitMatch[1], 10), 20) : 5;
+      const limit = limitMatch ? Math.max(1, Math.min(parseInt(limitMatch[1], 10), 20)) : 5;
+
+      if (knowledge.incomesSorted.length === 0) {
+        const message = 'No hay entradas registradas.';
+        return {
+          content: message,
+          decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${message}</p>`,
+        };
+      }
+
       const table = formatTransactionsTable(knowledge.incomesSorted, knowledge, limit);
+      if (!table.previewRows.length) {
+        const message = 'No hay entradas registradas.';
+        return {
+          content: message,
+          decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${message}</p>`,
+        };
+      }
+
       const { docs, totalUnits } = formatTotals(knowledge.incomesSorted.slice(0, limit));
-      const intro = `Últimas ${docs} entradas registradas (${totalUnits} unidades en total):`;
+      const intro = `Últimas ${formatNumber(docs)} entradas registradas (${formatNumber(totalUnits)} unidades en total):`;
+      const hasMore = table.allRows.length > table.previewRows.length;
+      const caption = hasMore
+        ? `Mostrando ${table.previewRows.length} de ${table.allRows.length} movimientos.`
+        : undefined;
+
+      const tableData: TableData = {
+        title: 'Últimas entradas registradas',
+        caption,
+        columns: table.columns,
+        previewRows: table.previewRows,
+        allRows: table.allRows,
+        csvFileName: buildCsvFilename('entradas_recientes'),
+        summaryBadges: [
+          { label: 'Movimientos', value: formatNumber(docs) },
+          { label: 'Unidades', value: formatNumber(totalUnits) },
+        ],
+        numericColumnIndexes: [2],
+      };
+
       return {
-        content: `${intro}\n\n${table.text}`,
+        content: table.text ? `${intro}\n\n${table.text}` : intro,
         decoratedHtml: `
           <div class="space-y-3">
-            <p class="text-sm text-gray-700 dark:text-gray-200">${intro}</p>
+            <p class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(intro)}</p>
             ${table.html}
           </div>
         `.trim(),
+        tableData,
       };
     }
 
     if (/cu[aá]nt/.test(lowerQuestion) || /total/.test(lowerQuestion)) {
       const { docs, totalUnits } = formatTotals(knowledge.incomesSorted);
-      const content = `Se registraron ${docs} entradas recientes por un total de ${totalUnits} unidades.`;
+      const content = `Se registraron ${formatNumber(docs)} entradas recientes por un total de ${formatNumber(
+        totalUnits
+      )} unidades.`;
       return {
         content,
         decoratedHtml: `<p class="text-sm text-gray-700 dark:text-gray-200">${content}</p>`,
@@ -349,6 +729,8 @@ const resolveLocalAnswer = (
   return null;
 };
 
+
+
 const AiAssistant: React.FC<AiAssistantProps> = ({
   items,
   transactions,
@@ -364,6 +746,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(() => new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   const aiAvailable = isRemoteProviderConfigured();
@@ -488,37 +871,71 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const toggleMessageExpansion = useCallback((id: string) => {
+    setExpandedMessages(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleExportCsv = useCallback((table: TableData) => {
+    if (typeof window === 'undefined') return;
+    const rowsForExport = table.allRows.length > 0 ? table.allRows : table.previewRows;
+    if (rowsForExport.length === 0 && table.columns.length === 0) {
+      return;
+    }
+
+    const csvLines = [table.columns, ...rowsForExport].map(row =>
+      row
+        .map(cell => {
+          const value = cell ?? '';
+          return `"${String(value).replace(/"/g, '""')}"`;
+        })
+        .join(';')
+    );
+
+    const csvContent = csvLines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', table.csvFileName || buildCsvFilename('reporte'));
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
   
   const handleSend = async () => {
     if (!userInput.trim() || isLoading) return;
 
     const userMessage = userInput.trim();
     const historyTurns = mapMessagesToTurns(messages).slice(-MAX_MEMORY_TURNS);
-    const newMessages: Message[] = [...messages, { sender: 'user', content: userMessage }];
+    const userEntry: Message = { id: createMessageId(), sender: 'user', content: userMessage };
+    const newMessages: Message[] = [...messages, userEntry];
     updateConversation(newMessages);
     setUserInput('');
 
     const localAnswer = resolveLocalAnswer(userMessage, knowledge);
     if (localAnswer) {
-      updateConversation([
-        ...newMessages,
-        {
-          sender: 'ai',
-          content: localAnswer.content,
-          ...(localAnswer.decoratedHtml ? { decoratedHtml: localAnswer.decoratedHtml } : {}),
-        },
-      ]);
+      const localMessage: Message = { id: createMessageId(), sender: 'ai', ...localAnswer };
+      updateConversation([...newMessages, localMessage]);
       return;
     }
 
     if (!aiAvailable) {
-      updateConversation([
-        ...newMessages,
-        {
-          sender: 'ai',
-          content: `La integración con ${providerLabel} no está configurada. Configura las credenciales correspondientes para habilitar el asistente.`,
-        },
-      ]);
+      const warningMessage: Message = {
+        id: createMessageId(),
+        sender: 'ai',
+        content: `La integración con ${providerLabel} no está configurada. Configura las credenciales correspondientes para habilitar el asistente.`,
+      };
+      updateConversation([...newMessages, warningMessage]);
       return;
     }
 
@@ -527,13 +944,12 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
         ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
         : 'el próximo ciclo';
       const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
-      updateConversation([
-        ...newMessages,
-        {
-          sender: 'ai',
-          content: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
-        },
-      ]);
+      const degradeMessage: Message = {
+        id: createMessageId(),
+        sender: 'ai',
+        content: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
+      };
+      updateConversation([...newMessages, degradeMessage]);
       return;
     }
 
@@ -543,14 +959,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
 
     const sendDemoLimitReached = (snapshot?: DemoUsageSnapshot | null) => {
       const resetLabel = getDemoResetLabel ? getDemoResetLabel(snapshot?.resetsOn) : 'el próximo ciclo';
-      updateConversation([
-        ...newMessages,
-        {
-          sender: 'ai',
-          decoratedHtml: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a <a href="mailto:info@puntolimpio.ar">info@puntolimpio.ar</a> para ampliar el acceso.`,
-          content: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a info@puntolimpio.ar para ampliar el acceso.`,
-        },
-      ]);
+      const limitMessage: Message = {
+        id: createMessageId(),
+        sender: 'ai',
+        content: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a info@puntolimpio.ar para ampliar el acceso.`,
+        decoratedHtml: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a <a href="mailto:info@puntolimpio.ar">info@puntolimpio.ar</a> para ampliar el acceso.`,
+      };
+      updateConversation([...newMessages, limitMessage]);
     };
 
     if (guardDemoUsage) {
@@ -597,18 +1012,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
 
       recordRemoteUsage('assistant');
 
-      const decoration = guardDemoUsage
-        ? decorateAssistantResponse(baseResponse, latestDemoSnapshot, limitValue, getDemoResetLabel)
-        : { content: baseResponse };
+      const parsedPayload = interpretAssistantResponse(baseResponse);
+      const decoratedPayload = guardDemoUsage
+        ? decorateAssistantResponse(parsedPayload, latestDemoSnapshot, limitValue, getDemoResetLabel)
+        : parsedPayload;
 
-      updateConversation([
-        ...newMessages,
-        {
-          sender: 'ai',
-          content: decoration.content,
-          decoratedHtml: decoration.decoratedHtml,
-        },
-      ]);
+      const aiMessage: Message = { id: createMessageId(), sender: 'ai', ...decoratedPayload };
+      updateConversation([...newMessages, aiMessage]);
     };
 
     if (cached) {
@@ -634,10 +1044,12 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
       await deliverResponse(aiResponse, guardDemoUsage);
     } catch (error) {
       console.error('AI Assistant error:', error);
-      updateConversation([
-        ...newMessages,
-        { sender: 'ai', content: 'Lo siento, ocurrió un error. Intenta de nuevo.' },
-      ]);
+      const errorMessage: Message = {
+        id: createMessageId(),
+        sender: 'ai',
+        content: 'Lo siento, ocurrió un error. Intenta de nuevo.',
+      };
+      updateConversation([...newMessages, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -683,18 +1095,129 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
                             </p>
                         </div>
                     )}
-                    {messages.map((msg, index) => (
-                        <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-md p-3 rounded-2xl ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none'}`}>
+                    {messages.map(msg => {
+                        const isUser = msg.sender === 'user';
+                        const bubbleTone = isUser
+                          ? 'bg-blue-600 text-white rounded-br-none'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none';
+                        const isExpanded = msg.tableData ? expandedMessages.has(msg.id) : false;
+                        const rowsToRender = msg.tableData
+                          ? (isExpanded ? msg.tableData.allRows : msg.tableData.previewRows)
+                          : [];
+                        const hasMoreRows = msg.tableData
+                          ? msg.tableData.allRows.length > msg.tableData.previewRows.length
+                          : false;
+
+                        return (
+                          <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-md p-3 rounded-2xl ${bubbleTone}`}>
+                              {msg.tableData ? (
+                                <div className="space-y-3">
+                                  {msg.tableData.summaryBadges && msg.tableData.summaryBadges.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                      {msg.tableData.summaryBadges.map(badge => (
+                                        <span
+                                          key={`${msg.id}-${badge.label}`}
+                                          className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 px-3 py-1 text-xs font-semibold dark:bg-blue-900/40 dark:text-blue-200"
+                                        >
+                                          <span className="mr-1">{badge.label}:</span>
+                                          <span>{badge.value}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div>
+                                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{msg.tableData.title}</p>
+                                    {msg.tableData.caption && (
+                                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{msg.tableData.caption}</p>
+                                    )}
+                                  </div>
+
+                                  {rowsToRender.length > 0 ? (
+                                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                                      <table className="min-w-full text-sm text-left">
+                                        <thead className="bg-gray-100 dark:bg-gray-700/60 text-gray-700 dark:text-gray-100">
+                                          <tr>
+                                            {msg.tableData.columns.map((column, index) => (
+                                              <th
+                                                key={`${msg.id}-col-${index}`}
+                                                scope="col"
+                                                className="px-3 py-2 font-semibold uppercase tracking-wide text-xs"
+                                              >
+                                                {column}
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="text-gray-700 dark:text-gray-100">
+                                          {rowsToRender.map((row, rowIndex) => (
+                                            <tr
+                                              key={`${msg.id}-row-${rowIndex}`}
+                                              className="border-b border-gray-200 dark:border-gray-700"
+                                            >
+                                              {row.map((cell, cellIndex) => {
+                                                const isNumeric = msg.tableData?.numericColumnIndexes?.includes(cellIndex);
+                                                const alignment = isNumeric ? 'text-right' : 'text-left';
+                                                const padding = cellIndex === row.length - 1 ? 'py-2 pl-3 pr-4' : 'py-2 px-3';
+                                                const emphasis = cellIndex === 0 ? 'font-medium' : '';
+                                                return (
+                                                  <td
+                                                    key={`${msg.id}-cell-${rowIndex}-${cellIndex}`}
+                                                    className={`${padding} ${alignment} ${emphasis}`}
+                                                  >
+                                                    {cell}
+                                                  </td>
+                                                );
+                                              })}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">No hay registros para mostrar.</p>
+                                  )}
+
+                                  <div className="flex flex-wrap gap-2 text-xs text-blue-700 dark:text-blue-300">
+                                    {hasMoreRows && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleMessageExpansion(msg.id)}
+                                        className="inline-flex items-center rounded-full border border-blue-200 px-3 py-1 font-semibold hover:bg-blue-50 dark:border-blue-500/50 dark:hover:bg-blue-500/10"
+                                      >
+                                        {isExpanded
+                                          ? 'Ver menos'
+                                          : `Ver todo (${msg.tableData.allRows.length})`}
+                                      </button>
+                                    )}
+                                    {msg.tableData.allRows.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleExportCsv(msg.tableData!)}
+                                        className="inline-flex items-center rounded-full border border-blue-200 px-3 py-1 font-semibold hover:bg-blue-50 dark:border-blue-500/50 dark:hover:bg-blue-500/10"
+                                      >
+                                        Exportar CSV
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {msg.footnote && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">{msg.footnote}</p>
+                                  )}
+                                </div>
+                              ) : (
                                 <div
                                   className="prose prose-sm dark:prose-invert"
                                   dangerouslySetInnerHTML={{
                                     __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
                                   }}
                                 />
+                              )}
                             </div>
-                        </div>
-                    ))}
+                          </div>
+                        );
+                    })}
                     {isLoading && (
                         <div className="flex justify-start">
                              <div className="max-w-md p-3 rounded-2xl bg-gray-200 dark:bg-gray-700 rounded-bl-none">
