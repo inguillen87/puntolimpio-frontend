@@ -75,6 +75,11 @@ export const findUserInvitationByEmail = async (email: string): Promise<Invitati
     return null;
 }
 
+export const hasAnyUsers = async (): Promise<boolean> => {
+    const usersCountSnapshot = await getCountFromServer(collection(db, USERS_COLLECTION));
+    return usersCountSnapshot.data().count > 0;
+}
+
 export const inviteUserToOrganization = async (organizationId: string, email: string, role: UserRole): Promise<void> => {
     const normalizedEmail = email.toLowerCase();
     const invitationRef = doc(db, INVITATIONS_COLLECTION, normalizedEmail);

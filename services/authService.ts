@@ -1,9 +1,10 @@
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
-  User as FirebaseUser
+  User as FirebaseUser,
+  deleteUser,
 } from "firebase/auth";
 import { isFirebaseConfigured, auth } from '../firebaseConfig';
 import * as db from './databaseService';
@@ -29,11 +30,17 @@ let mockAuthListener: ((user: FirebaseUser | null) => void) | null = null;
 let mockCurrentUser: FirebaseUser | null = null;
 
 export const registerUser = async (email: string, password: string) => {
+    const normalizedEmail = email.toLowerCase();
+
     if (!isFirebaseConfigured) {
         // Mock registration logic
-        const invitation = await db.findUserInvitationByEmail(email);
-        if (!invitation) throw new Error("Este correo no ha sido invitado.");
-        
+        const invitation = await db.findUserInvitationByEmail(normalizedEmail);
+        if (!invitation) {
+            const invitationError: any = new Error("Necesitás una invitación para crear una cuenta.");
+            invitationError.code = 'invitation/required';
+            throw invitationError;
+        }
+
         const newUid = `mock-uid-${Date.now()}`;
         // The profile will be created on first login via getOrCreateUserProfile in the mock service
         return { user: { uid: newUid } };
@@ -41,16 +48,57 @@ export const registerUser = async (email: string, password: string) => {
 
     // Real Firebase registration
     if (!auth) throw new Error("Firebase Auth no está inicializado.");
-    
-    // REMOVED INVITATION PRE-CHECK. We let Firebase Auth be the source of truth for email existence.
-    // The profile will be created on first login by App.tsx, which handles the invitation check.
-    
+
+    const hasExistingUsers = await db.hasAnyUsers();
+    if (hasExistingUsers) {
+        const invitation = await db.findUserInvitationByEmail(normalizedEmail);
+        if (!invitation) {
+            const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
+            invitationError.code = 'invitation/required';
+            throw invitationError;
+        }
+    }
+
     try {
-        return await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+
+        try {
+            const profileResult = await db.getOrCreateUserProfile(userCredential.user.uid, normalizedEmail);
+            if (!profileResult) {
+                await deleteUser(userCredential.user);
+                const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
+                invitationError.code = 'invitation/required';
+                throw invitationError;
+            }
+        } catch (profileError: any) {
+            if (profileError?.code === 'permission-denied') {
+                try {
+                    await deleteUser(userCredential.user);
+                } catch (cleanupError) {
+                    console.error('No se pudo eliminar el usuario tras un fallo de permisos:', cleanupError);
+                }
+                const invitationError: any = new Error('Necesitás una invitación para crear una cuenta.');
+                invitationError.code = 'invitation/required';
+                throw invitationError;
+            }
+
+            if (profileError?.code !== 'invitation/required') {
+                try {
+                    await deleteUser(userCredential.user);
+                } catch (cleanupError) {
+                    console.error('No se pudo eliminar el usuario tras un fallo en la creación del perfil:', cleanupError);
+                }
+            }
+            throw profileError;
+        }
+
+        return userCredential;
     } catch (error: any) {
         if (error.code === 'auth/email-already-in-use') {
             // This is a more helpful error message. It guides the user to the correct action.
-            throw new Error("Un usuario con este correo ya existe. Por favor, intenta iniciar sesión.");
+            const friendlyError: any = new Error("Un usuario con este correo ya existe. Por favor, intenta iniciar sesión.");
+            friendlyError.code = 'auth/email-already-in-use';
+            throw friendlyError;
         }
         throw error; // Rethrow other auth errors (weak-password, etc.)
     }
