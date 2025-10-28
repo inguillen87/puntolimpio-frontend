@@ -766,6 +766,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   const aiAvailable = isRemoteProviderConfigured();
   const providerLabel = getProviderLabel();
+  const effectiveDemoLimit = demoLimit ?? DEMO_UPLOAD_LIMIT;
 
   const conversationSummaryRef = useRef<string>('');
   const cachedAnswersRef = useRef<Map<string, string>>(new Map());
@@ -883,6 +884,54 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     };
   }, [items, transactions, partners]);
 
+  const inventoryPulse = useMemo(
+    () => {
+      const stockValues = Array.from(knowledge.stockByItemId.values());
+      const totalUnits = stockValues.reduce((acc, value) => acc + value, 0);
+      const activeItems = items.filter(item => (knowledge.stockByItemId.get(item.id) ?? 0) > 0).length;
+      const lowStockThreshold = 10;
+      const lowStockCount = items.filter(item => {
+        const stock = knowledge.stockByItemId.get(item.id) ?? 0;
+        return stock > 0 && stock <= lowStockThreshold;
+      }).length;
+      const latestTransaction = knowledge.outcomesSorted[0] ?? knowledge.incomesSorted[0] ?? null;
+      const lastMovementLabel = latestTransaction
+        ? `${formatDate(latestTransaction.createdAt)} • ${
+            latestTransaction.type === TransactionType.OUTCOME ? 'Egreso' : 'Ingreso'
+          }`
+        : 'Sin movimientos recientes';
+
+      return {
+        totalUnits,
+        activeItems,
+        lowStockCount,
+        lowStockThreshold,
+        lastMovementLabel,
+      };
+    },
+    [knowledge, items]
+  );
+
+  const demoUsageSummary = useMemo(() => {
+    if (!isDemoAccount) {
+      return null;
+    }
+
+    const limit = effectiveDemoLimit > 0 ? effectiveDemoLimit : DEMO_UPLOAD_LIMIT;
+    const remaining = Math.min(limit, Math.max(0, demoUsage?.remaining ?? limit));
+    const used = Math.min(limit, Math.max(0, limit - remaining));
+    const progress = limit > 0 ? Math.round((used / limit) * 100) : 0;
+    const resetLabel = getDemoResetLabel ? getDemoResetLabel(demoUsage?.resetsOn ?? null) : null;
+
+    return {
+      limit,
+      remaining,
+      used,
+      progress,
+      resetLabel,
+    };
+  }, [demoUsage, effectiveDemoLimit, getDemoResetLabel, isDemoAccount]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -995,7 +1044,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     }
 
     const guardDemoUsage = Boolean(isDemoAccount && (demoLimit ?? null) !== null);
-    const limitValue = demoLimit ?? DEMO_UPLOAD_LIMIT;
+    const limitValue = effectiveDemoLimit;
     let latestDemoSnapshot: DemoUsageSnapshot | null = demoUsage ?? null;
 
     const sendDemoLimitReached = (snapshot?: DemoUsageSnapshot | null) => {
@@ -1138,10 +1187,11 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
             aria-hidden="true"
           />
           <div className="relative z-50 flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200/60 bg-white/95 shadow-2xl shadow-slate-900/30 backdrop-blur-xl animate-panel-in dark:border-slate-700/60 dark:bg-slate-900/90">
-            <div
-              className="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-500/10 via-transparent to-purple-500/10"
-              aria-hidden="true"
-            />
+            <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+              <div className="absolute -top-24 -left-20 h-64 w-64 rounded-full bg-blue-400/20 blur-3xl animate-soft-glow dark:bg-blue-500/15" />
+              <div className="absolute bottom-[-88px] right-[-60px] h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl animate-soft-glow [animation-delay:2s] dark:bg-cyan-400/15" />
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 via-transparent to-purple-500/10" />
+            </div>
             <header className="relative z-10 flex items-center justify-between gap-4 border-b border-slate-200/60 bg-white/70 px-6 py-4 backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/50">
               <div className="flex items-center gap-3">
                 <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-white shadow-lg">
@@ -1172,16 +1222,39 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:bg-slate-800/80 dark:hover:text-white"
-                aria-label="Cerrar asistente"
-              >
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-3">
+                {demoUsageSummary && (
+                  <div className="hidden sm:flex w-48 flex-col gap-1 rounded-2xl border border-blue-200/70 bg-blue-50/70 px-3 py-2 text-xs text-blue-800 shadow-inner backdrop-blur dark:border-blue-500/40 dark:bg-blue-900/20 dark:text-blue-100">
+                    <div className="flex items-center justify-between font-semibold">
+                      <span>Demo IA</span>
+                      <span>
+                        {demoUsageSummary.remaining}/{demoUsageSummary.limit}
+                      </span>
+                    </div>
+                    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-blue-100/70 dark:bg-blue-900/40">
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-300"
+                        style={{ width: `${Math.min(100, Math.max(0, demoUsageSummary.progress))}%` }}
+                      />
+                    </div>
+                    {demoUsageSummary.resetLabel && (
+                      <span className="text-[10px] text-blue-600/80 dark:text-blue-200/80">
+                        Se reinicia {demoUsageSummary.resetLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:bg-slate-800/80 dark:hover:text-white"
+                  aria-label="Cerrar asistente"
+                >
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </header>
 
             <main className="relative z-10 flex-1 space-y-6 overflow-y-auto px-6 py-6 [scrollbar-width:thin]">
@@ -1190,16 +1263,40 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
                 <p className="mt-1 text-sm">Podés preguntarme sobre niveles de stock, movimientos recientes o generar reportes inmediatos.</p>
               </section>
 
+              <section className="grid gap-3 sm:grid-cols-3" aria-label="Pulso del inventario">
+                <article className="group relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/60">
+                  <span className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br from-blue-500/20 via-transparent to-emerald-400/20 opacity-0 blur-xl transition duration-500 group-hover:opacity-100" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Stock disponible</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{formatNumber(Math.max(0, inventoryPulse.totalUnits))}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">Unidades actualmente en inventario</p>
+                </article>
+
+                <article className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/60">
+                  <span className="pointer-events-none absolute inset-x-4 -top-8 h-16 rounded-full bg-blue-500/20 blur-2xl" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">Artículos activos</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{formatNumber(inventoryPulse.activeItems)}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">{inventoryPulse.lowStockCount} en alerta (≤ {inventoryPulse.lowStockThreshold} u.)</p>
+                </article>
+
+                <article className="relative overflow-hidden rounded-2xl border border-blue-200/60 bg-gradient-to-br from-blue-500/10 via-sky-500/5 to-indigo-500/10 px-4 py-4 text-sm shadow-sm backdrop-blur dark:border-blue-500/40 dark:from-blue-900/30 dark:via-slate-900/30 dark:to-indigo-900/30">
+                  <span className="pointer-events-none absolute -right-12 top-1/2 h-28 w-28 -translate-y-1/2 rounded-full bg-blue-500/20 blur-3xl" aria-hidden="true" />
+                  <p className="text-xs font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-200">Último movimiento</p>
+                  <p className="mt-2 text-base font-semibold text-slate-900 dark:text-white">{inventoryPulse.lastMovementLabel}</p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Actualizado automáticamente con las últimas cargas</p>
+                </article>
+              </section>
+
               <section className="space-y-3" aria-label="Sugerencias rápidas">
                 <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Sugerencias inteligentes</h4>
                 <div className="flex flex-wrap gap-2">
-                  {SUGGESTED_PROMPTS.map(item => (
+                  {SUGGESTED_PROMPTS.map((item, index) => (
                     <button
                       key={item.label}
                       type="button"
                       onClick={() => handleSuggestedPrompt(item.prompt)}
                       title={item.prompt}
-                      className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-700/70 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:border-blue-400 dark:hover:bg-blue-500/20 dark:hover:text-blue-100"
+                      className="group inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-700/70 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:border-blue-400 dark:hover:bg-blue-500/20 dark:hover:text-blue-100 animate-chip-enter"
+                      style={{ animationDelay: `${index * 80}ms` }}
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-blue-500 transition group-hover:bg-blue-600 dark:bg-blue-300" />
                       {item.label}
@@ -1236,108 +1333,121 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
                   );
 
                   return (
-                    <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-message-entry`}>
-                      <div
-                        className={`group relative max-w-xl rounded-3xl px-5 py-4 text-sm leading-relaxed shadow-lg ring-1 ring-inset transition-all duration-300 ${bubbleTone}`}
-                      >
-                        {msg.tableData ? (
-                          <div className="space-y-4">
-                            {msg.tableData.summaryBadges && msg.tableData.summaryBadges.length > 0 && (
-                              <div className="flex flex-wrap gap-2">
-                                {msg.tableData.summaryBadges.map(badge => (
-                                  <span
-                                    key={`${msg.id}-${badge.label}`}
-                                    className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur group-hover:bg-white/30 dark:bg-slate-900/30"
-                                  >
-                                    <span className="text-xs uppercase tracking-wider opacity-75">{badge.label}</span>
-                                    <span className="text-sm font-bold">{badge.value}</span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900 dark:text-white">{msg.tableData.title}</p>
-                              {msg.tableData.caption && (
-                                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{msg.tableData.caption}</p>
+                    <div
+                      key={msg.id}
+                      className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-message-entry`}
+                    >
+                      <div className="group relative max-w-xl">
+                        <span
+                          className={`pointer-events-none absolute -inset-1 rounded-[28px] opacity-0 blur-lg transition duration-500 group-hover:opacity-100 ${
+                            isUser
+                              ? 'bg-gradient-to-br from-blue-500/50 via-cyan-400/30 to-transparent'
+                              : 'bg-gradient-to-br from-slate-400/30 via-blue-500/20 to-transparent'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <div
+                          className={`relative overflow-hidden rounded-3xl px-5 py-4 text-sm leading-relaxed shadow-lg ring-1 ring-inset transition-all duration-300 ${bubbleTone}`}
+                        >
+                          {msg.tableData ? (
+                            <div className="space-y-4">
+                              {msg.tableData.summaryBadges && msg.tableData.summaryBadges.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {msg.tableData.summaryBadges.map(badge => (
+                                    <span
+                                      key={`${msg.id}-${badge.label}`}
+                                      className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur group-hover:bg-white/30 dark:bg-slate-900/30"
+                                    >
+                                      <span className="text-xs uppercase tracking-wider opacity-75">{badge.label}</span>
+                                      <span className="text-sm font-bold">{badge.value}</span>
+                                    </span>
+                                  ))}
+                                </div>
                               )}
-                            </div>
 
-                            {rowsToRender.length > 0 ? (
-                              <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
-                                <table className="min-w-full text-sm text-left">
-                                  <thead className="bg-slate-100/80 text-slate-600 dark:bg-slate-800/80 dark:text-slate-100">
-                                    <tr>
-                                      {msg.tableData.columns.map((column, index) => (
-                                        <th
-                                          key={`${msg.id}-col-${index}`}
-                                          scope="col"
-                                          className="px-4 py-2 text-xs font-semibold uppercase tracking-wide"
-                                        >
-                                          {column}
-                                        </th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-200/70 text-slate-700 dark:divide-slate-700/60 dark:text-slate-100">
-                                    {rowsToRender.map((row, rowIndex) => (
-                                      <tr key={`${msg.id}-row-${rowIndex}`}>
-                                        {row.map((cell, cellIndex) => {
-                                          const isNumeric = msg.tableData?.numericColumnIndexes?.includes(cellIndex);
-                                          const alignment = isNumeric ? 'text-right' : 'text-left';
-                                          const padding = cellIndex === row.length - 1 ? 'py-2 pl-4 pr-5' : 'py-2 px-4';
-                                          const emphasis = cellIndex === 0 ? 'font-medium text-slate-900 dark:text-white' : '';
-                                          return (
-                                            <td
-                                              key={`${msg.id}-cell-${rowIndex}-${cellIndex}`}
-                                              className={`${padding} ${alignment} ${emphasis}`}
-                                            >
-                                              {cell}
-                                            </td>
-                                          );
-                                        })}
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900 dark:text-white">{msg.tableData.title}</p>
+                                {msg.tableData.caption && (
+                                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{msg.tableData.caption}</p>
+                                )}
+                              </div>
+
+                              {rowsToRender.length > 0 ? (
+                                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/40">
+                                  <table className="min-w-full text-sm text-left">
+                                    <thead className="bg-slate-100/80 text-slate-600 dark:bg-slate-800/80 dark:text-slate-100">
+                                      <tr>
+                                        {msg.tableData.columns.map((column, index) => (
+                                          <th
+                                            key={`${msg.id}-col-${index}`}
+                                            scope="col"
+                                            className="px-4 py-2 text-xs font-semibold uppercase tracking-wide"
+                                          >
+                                            {column}
+                                          </th>
+                                        ))}
                                       </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-slate-600 dark:text-slate-300">No hay registros para mostrar.</p>
-                            )}
-
-                            <div className="flex flex-wrap gap-2 text-xs font-semibold text-blue-700 dark:text-blue-300">
-                              {hasMoreRows && (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleMessageExpansion(msg.id)}
-                                  className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
-                                >
-                                  {isExpanded ? 'Ver menos' : `Ver todo (${msg.tableData.allRows.length})`}
-                                </button>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200/70 text-slate-700 dark:divide-slate-700/60 dark:text-slate-100">
+                                      {rowsToRender.map((row, rowIndex) => (
+                                        <tr key={`${msg.id}-row-${rowIndex}`}>
+                                          {row.map((cell, cellIndex) => {
+                                            const isNumeric = msg.tableData?.numericColumnIndexes?.includes(cellIndex);
+                                            const alignment = isNumeric ? 'text-right' : 'text-left';
+                                            const padding = cellIndex === row.length - 1 ? 'py-2 pl-4 pr-5' : 'py-2 px-4';
+                                            const emphasis = cellIndex === 0 ? 'font-medium text-slate-900 dark:text-white' : '';
+                                            return (
+                                              <td
+                                                key={`${msg.id}-cell-${rowIndex}-${cellIndex}`}
+                                                className={`${padding} ${alignment} ${emphasis}`}
+                                              >
+                                                {cell}
+                                              </td>
+                                            );
+                                          })}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-slate-600 dark:text-slate-300">No hay registros para mostrar.</p>
                               )}
-                              {msg.tableData.allRows.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleExportCsv(msg.tableData!)}
-                                  className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
-                                >
-                                  Exportar CSV
-                                </button>
+
+                              <div className="flex flex-wrap gap-2 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                                {hasMoreRows && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMessageExpansion(msg.id)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
+                                  >
+                                    {isExpanded ? 'Ver menos' : `Ver todo (${msg.tableData.allRows.length})`}
+                                  </button>
+                                )}
+                                {msg.tableData.allRows.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleExportCsv(msg.tableData!)}
+                                    className="inline-flex items-center gap-2 rounded-full border border-blue-200/80 bg-white/50 px-3 py-1 transition hover:bg-blue-50 hover:text-blue-800 dark:border-blue-500/50 dark:bg-slate-900/40 dark:hover:bg-blue-500/20"
+                                  >
+                                    Exportar CSV
+                                  </button>
+                                )}
+                              </div>
+
+                              {msg.footnote && (
+                                <p className="text-xs text-slate-500 dark:text-slate-300">{msg.footnote}</p>
                               )}
                             </div>
-
-                            {msg.footnote && (
-                              <p className="text-xs text-slate-500 dark:text-slate-300">{msg.footnote}</p>
-                            )}
-                          </div>
-                        ) : (
-                          <div
-                            className="prose prose-sm dark:prose-invert"
-                            dangerouslySetInnerHTML={{
-                              __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
-                            }}
-                          />
-                        )}
+                          ) : (
+                            <div
+                              className="prose prose-sm dark:prose-invert"
+                              dangerouslySetInnerHTML={{
+                                __html: msg.decoratedHtml ?? msg.content.replace(/\n/g, '<br />'),
+                              }}
+                            />
+                          )}
+                        </div>
                       </div>
                     </div>
                   );

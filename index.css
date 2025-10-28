@@ -47,6 +47,16 @@
   .animation-delay-400 {
     animation-delay: 0.4s;
   }
+
+  .animate-chip-enter {
+    animation: chip-enter 0.4s ease forwards;
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  .animate-soft-glow {
+    animation: soft-glow 12s ease-in-out infinite;
+  }
 }
 
 @keyframes overlay-fade {
@@ -93,11 +103,40 @@
   }
 }
 
+@keyframes chip-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes soft-glow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: translate3d(12px, -10px, 0) scale(1.08);
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-overlay-fade,
   .animate-panel-in,
   .animate-message-entry,
-  .typing-indicator-dot {
+  .typing-indicator-dot,
+  .animate-chip-enter,
+  .animate-soft-glow {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     animation-name: none !important;
