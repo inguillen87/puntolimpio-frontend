@@ -35,36 +35,33 @@ const Register: React.FC<RegisterProps> = ({ onSwitchToLogin, onBackToLanding })
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const invitation = await dbService.findUserInvitationByEmail(normalizedEmail);
-      if (!invitation) {
-        setPendingEmail(email.trim());
-        setShowInviteRequiredModal(true);
-        setIsLoading(false);
-        return;
-      }
 
       await registerUser(normalizedEmail, password);
       // Success will be handled by the onAuthStateChanged observer in App.tsx
       // It will automatically log the user in.
     } catch (err: any) {
       console.error(err);
-      if (err.code) {
-        switch (err.code) {
-          case 'auth/email-already-in-use':
-            setError('Este correo electrónico ya está en uso por otra cuenta.');
-            break;
-          case 'auth/weak-password':
-            setError('La contraseña debe tener al menos 6 caracteres.');
-            break;
-          default:
-            setError('Ocurrió un error inesperado al registrar la cuenta.');
-            break;
-        }
+      if (err.code === 'invitation/required') {
+        setPendingEmail(email.trim());
+        setShowInviteRequiredModal(true);
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('Este correo electrónico ya está en uso por otra cuenta.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('La contraseña debe tener al menos 6 caracteres.');
       } else {
-          setError(err.message || 'Ocurrió un error inesperado.');
+        setError(err.message || 'Ocurrió un error inesperado al registrar la cuenta.');
       }
-      setIsLoading(false);
     }
+    setIsLoading(false);
+  };
+
+  const closeInviteModal = () => {
+    setShowInviteRequiredModal(false);
+  };
+
+  const handleDemoLoginRedirect = () => {
+    closeInviteModal();
+    onSwitchToLogin();
   };
 
   const closeInviteModal = () => {
