@@ -1,4 +1,5 @@
 import { DocumentType, ItemType, ScannedControlSheetData, ScannedTransactionData } from '../types';
+import type { AssistantConversationTurn } from './aiService';
 import { readFileAsDataUrl } from '../utils/imageProcessing';
 import { normalizeItemName } from '../utils/itemNormalization';
 
@@ -37,24 +38,45 @@ const parseMessageContent = (message: any): string => {
 
 export const isOpenAiConfigured = Boolean(OPENAI_API_KEY);
 
-export const getAiAssistantResponse = async (context: string, question: string): Promise<string> => {
+export const getAiAssistantResponse = async (
+  context: string,
+  question: string,
+  history: AssistantConversationTurn[] = [],
+  summary?: string
+): Promise<string> => {
   if (!isOpenAiConfigured) {
     throw new Error('La clave de OpenAI no está configurada.');
   }
 
+  const trimmedQuestion = question.trim();
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    {
+      role: 'system',
+      content: ASSISTANT_SYSTEM_PROMPT,
+    },
+    {
+      role: 'system',
+      content: `Contexto de Datos (JSON):\n${context}`,
+    },
+  ];
+
+  if (summary && summary.trim().length > 0) {
+    messages.push({ role: 'system', content: `Resumen de conversación previo:\n${summary.trim()}` });
+  }
+
+  history.forEach(turn => {
+    const cleaned = turn.content.trim();
+    if (cleaned) {
+      messages.push({ role: turn.role, content: cleaned });
+    }
+  });
+
+  messages.push({ role: 'user', content: trimmedQuestion });
+
   const body = {
     model: OPENAI_MODEL,
     temperature: 0.2,
-    messages: [
-      {
-        role: 'system',
-        content: ASSISTANT_SYSTEM_PROMPT,
-      },
-      {
-        role: 'user',
-        content: `Contexto de Datos (JSON):\n${context}\n\nPregunta del Usuario:\n${question}`,
-      },
-    ],
+    messages,
   };
 
   const response = await fetch(OPENAI_CHAT_URL, {

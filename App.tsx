@@ -29,7 +29,7 @@ import {
   DemoUsageSnapshot,
   getDemoAccountConfig,
   getDemoUsageSnapshot,
-  recordDemoUpload,
+  recordDemoUsage,
 } from './services/demoUsageService';
 
 const databaseService = isFirebaseConfigured ? db : mockDb;
@@ -133,6 +133,81 @@ const AppContent: React.FC = () => {
     return resetDate.toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' });
   }, []);
 
+  const resolveDemoScope = useCallback(
+    (override?: DemoUsageScope | null): DemoUsageScope | null => {
+      if (override) {
+        return override;
+      }
+      return buildDemoUsageScope();
+    },
+    [buildDemoUsageScope]
+  );
+
+  const loadDemoUsageSnapshot = useCallback(
+    async (override?: DemoUsageScope | null): Promise<DemoUsageSnapshot | null> => {
+      if (!demoAccountConfig) return null;
+      const scope = resolveDemoScope(override);
+      if (!scope) return null;
+      return getDemoUsageSnapshot(scope, demoLimit);
+    },
+    [demoAccountConfig, demoLimit, resolveDemoScope]
+  );
+
+  const persistDemoUsageSnapshot = useCallback(
+    async (
+      amount: number = 1,
+      override?: DemoUsageScope | null
+    ): Promise<DemoUsageSnapshot | null> => {
+      if (!demoAccountConfig) return null;
+      const scope = resolveDemoScope(override);
+      if (!scope) return null;
+      return recordDemoUsage(scope, amount, demoLimit);
+    },
+    [demoAccountConfig, demoLimit, resolveDemoScope]
+  );
+
+  const refreshDemoUsage = useCallback(
+    async (override?: DemoUsageScope | null): Promise<DemoUsageSnapshot | null> => {
+      try {
+        const snapshot = await loadDemoUsageSnapshot(override);
+        setDemoUsage(snapshot ?? null);
+        return snapshot ?? null;
+      } catch (error) {
+        console.warn('No se pudo recuperar el límite demo.', error);
+        setDemoUsage(null);
+        return null;
+      }
+    },
+    [loadDemoUsageSnapshot]
+  );
+
+  const consumeDemoUsage = useCallback(
+    async (
+      amount: number = 1,
+      override?: DemoUsageScope | null
+    ): Promise<DemoUsageSnapshot | null> => {
+      try {
+        const snapshot = await persistDemoUsageSnapshot(amount, override);
+        setDemoUsage(snapshot ?? null);
+        return snapshot ?? null;
+      } catch (error) {
+        console.warn('No se pudo registrar el consumo demo.', error);
+        return null;
+      }
+    },
+    [persistDemoUsageSnapshot]
+  );
+
+  const refreshDemoUsageForChat = useCallback(
+    (): Promise<DemoUsageSnapshot | null> => refreshDemoUsage(),
+    [refreshDemoUsage]
+  );
+
+  const consumeDemoUsageForChat = useCallback(
+    (): Promise<DemoUsageSnapshot | null> => consumeDemoUsage(1),
+    [consumeDemoUsage]
+  );
+
   useEffect(() => {
     const scope = buildDemoUsageScope();
     if (!demoAccountConfig || !scope) {
@@ -143,9 +218,9 @@ const AppContent: React.FC = () => {
     let isMounted = true;
     (async () => {
       try {
-        const snapshot = await getDemoUsageSnapshot(scope, demoLimit);
+        const snapshot = await loadDemoUsageSnapshot(scope);
         if (isMounted) {
-          setDemoUsage(snapshot);
+          setDemoUsage(snapshot ?? null);
         }
       } catch (error) {
         console.warn('No se pudo recuperar el límite demo.', error);
@@ -158,7 +233,7 @@ const AppContent: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [buildDemoUsageScope, demoAccountConfig, demoLimit]);
+  }, [buildDemoUsageScope, demoAccountConfig, loadDemoUsageSnapshot]);
 
   useEffect(() => {
     if (organization?.id) {
@@ -400,9 +475,8 @@ const AppContent: React.FC = () => {
     const shouldEnforceDemoLimit = !!usageScope && (documentFile || type === DocumentType.CONTROL);
 
     if (shouldEnforceDemoLimit && usageScope) {
-      const demoSnapshot = await getDemoUsageSnapshot(usageScope, demoLimit);
-      setDemoUsage(demoSnapshot);
-      if (demoSnapshot.remaining <= 0) {
+      const demoSnapshot = await refreshDemoUsage(usageScope);
+      if (demoSnapshot && demoSnapshot.remaining <= 0) {
         const resetLabel = getResetLabel(demoSnapshot.resetsOn);
         const limitMessage = (
           <div>
@@ -415,6 +489,9 @@ const AppContent: React.FC = () => {
         );
         showNotification(limitMessage, true);
         throw new Error('Límite de cargas demo alcanzado.');
+      }
+      if (!demoSnapshot) {
+        console.warn('No se pudo obtener el estado demo antes de procesar la carga.');
       }
     }
 
@@ -516,12 +593,11 @@ const AppContent: React.FC = () => {
             )
         }
         if (shouldEnforceDemoLimit && usageScope) {
-          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
-          setDemoUsage(updatedSnapshot);
+          const updatedSnapshot = await consumeDemoUsage(1, usageScope);
           notificationMessage = (
             <div>
               {notificationMessage}
-              {renderDemoUsageNote(updatedSnapshot)}
+              {updatedSnapshot ? renderDemoUsageNote(updatedSnapshot) : null}
             </div>
           );
         }
@@ -610,12 +686,11 @@ const AppContent: React.FC = () => {
         );
 
         if (shouldEnforceDemoLimit && usageScope) {
-          const updatedSnapshot = await recordDemoUpload(usageScope, 1, demoLimit);
-          setDemoUsage(updatedSnapshot);
+          const updatedSnapshot = await consumeDemoUsage(1, usageScope);
           successMessage = (
             <div>
               {successMessage}
-              {renderDemoUsageNote(updatedSnapshot)}
+              {updatedSnapshot ? renderDemoUsageNote(updatedSnapshot) : null}
             </div>
           );
         }
@@ -637,6 +712,8 @@ const AppContent: React.FC = () => {
     buildDemoUsageScope,
     demoLimit,
     getResetLabel,
+    refreshDemoUsage,
+    consumeDemoUsage,
   ]);
 
   const handleConfirmManualTransaction = useCallback(async (transactionItems: ScannedItem[], type: TransactionType, documentFile?: File, locationId?: string, partnerId?: string, newPartnerName?: string) => {
@@ -1145,7 +1222,19 @@ const AppContent: React.FC = () => {
         </div>
       )}
       
-      {!isLoading && currentUser && <AiAssistant items={items} transactions={transactions} partners={partners} />}
+      {!isLoading && currentUser && (
+        <AiAssistant
+          items={items}
+          transactions={transactions}
+          partners={partners}
+          demoLimit={demoAccountConfig ? demoLimit : undefined}
+          demoUsage={demoUsage}
+          isDemoAccount={Boolean(demoAccountConfig)}
+          onRefreshDemoUsage={demoAccountConfig ? refreshDemoUsageForChat : undefined}
+          onConsumeDemoUsage={demoAccountConfig ? consumeDemoUsageForChat : undefined}
+          getDemoResetLabel={demoAccountConfig ? getResetLabel : undefined}
+        />
+      )}
 
       {itemsForQrModal && <QrCodeBulkDisplayModal items={itemsForQrModal} onClose={() => setItemsForQrModal(null)} />}
     </div>

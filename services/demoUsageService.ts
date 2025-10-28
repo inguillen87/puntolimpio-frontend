@@ -225,7 +225,7 @@ export const getDemoUsageSnapshot = async (
   return ensureSnapshot(scope, limit);
 };
 
-export const recordDemoUpload = async (
+export const recordDemoUsage = async (
   scope: DemoUsageScope,
   amount: number = 1,
   limit: number = DEMO_UPLOAD_LIMIT
@@ -239,3 +239,9 @@ export const recordDemoUpload = async (
   };
   return ensureSnapshot(scope, limit, mutator);
 };
+
+export const recordDemoUpload = (
+  scope: DemoUsageScope,
+  amount: number = 1,
+  limit: number = DEMO_UPLOAD_LIMIT
+): Promise<DemoUsageSnapshot> => recordDemoUsage(scope, amount, limit);

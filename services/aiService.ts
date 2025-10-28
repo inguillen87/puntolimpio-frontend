@@ -5,6 +5,11 @@ import * as openai from './openAiService';
 type RemoteAiProvider = 'gemini' | 'openai';
 export type AiProviderName = RemoteAiProvider | 'none';
 
+export interface AssistantConversationTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 const PROVIDER_LABELS: Record<RemoteAiProvider, string> = {
   gemini: 'Gemini',
   openai: 'OpenAI',
@@ -108,11 +113,16 @@ const runWithProviders = async <T>(executor: (provider: RemoteAiProvider) => Pro
   throw new Error(errors.join(' | '));
 };
 
-export const getAiAssistantResponse = async (context: string, question: string): Promise<string> =>
+export const getAiAssistantResponse = async (
+  context: string,
+  question: string,
+  history: AssistantConversationTurn[] = [],
+  summary?: string
+): Promise<string> =>
   runWithProviders(provider =>
     provider === 'openai'
-      ? openai.getAiAssistantResponse(context, question)
-      : gemini.getAiAssistantResponse(context, question)
+      ? openai.getAiAssistantResponse(context, question, history, summary)
+      : gemini.getAiAssistantResponse(context, question, history, summary)
   );
 
 export const scanDocument = async (file: File): Promise<ScannedTransactionData> =>

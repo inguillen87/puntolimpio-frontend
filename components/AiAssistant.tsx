@@ -1,6 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Item, Transaction, Partner, TransactionType } from '../types';
-import { getAiAssistantResponse, isRemoteProviderConfigured, getProviderLabel } from '../services/aiService';
+import {
+  getAiAssistantResponse,
+  isRemoteProviderConfigured,
+  getProviderLabel,
+  AssistantConversationTurn,
+} from '../services/aiService';
+import { DEMO_UPLOAD_LIMIT, DemoUsageSnapshot } from '../services/demoUsageService';
 import { canonicalItemKey, normalizePartnerName } from '../utils/itemNormalization';
 import Spinner from './Spinner';
 import { useUsageLimits } from '../context/UsageLimitsContext';
@@ -9,11 +15,18 @@ interface AiAssistantProps {
   items: Item[];
   transactions: Transaction[];
   partners: Partner[];
+  demoLimit?: number | null;
+  demoUsage?: DemoUsageSnapshot | null;
+  onRefreshDemoUsage?: () => Promise<DemoUsageSnapshot | null>;
+  onConsumeDemoUsage?: () => Promise<DemoUsageSnapshot | null>;
+  isDemoAccount?: boolean;
+  getDemoResetLabel?: (isoDate?: string | null) => string;
 }
 
 interface Message {
   sender: 'user' | 'ai';
-  text: string;
+  content: string;
+  decoratedHtml?: string;
 }
 
 interface KnowledgeBase {
@@ -43,11 +56,93 @@ const formatDate = (isoString: string) => {
   return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 };
 
-const buildHistorySnippet = (history: Message[]): string => {
-  if (history.length === 0) return '';
-  return history
-    .map(entry => `${entry.sender === 'user' ? 'Usuario' : 'Asistente'}: ${entry.text.replace(/\s+/g, ' ').trim()}`)
+const MAX_MEMORY_TURNS = 8;
+const MAX_SUMMARY_LENGTH = 1400;
+
+const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const mapMessagesToTurns = (messages: Message[]): AssistantConversationTurn[] =>
+  messages.map(message => ({
+    role: message.sender === 'user' ? 'user' : 'assistant',
+    content: compactWhitespace(message.content),
+  }));
+
+const truncateText = (value: string, limit: number) =>
+  value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+
+const summarizeConversation = (messages: Message[]): string => {
+  if (messages.length === 0) {
+    return '';
+  }
+
+  const normalized = messages.map(entry =>
+    `${entry.sender === 'user' ? 'Usuario' : 'Asistente'}: ${compactWhitespace(entry.content)}`
+  );
+
+  const joined = normalized.join('\n');
+  if (joined.length <= MAX_SUMMARY_LENGTH) {
+    return joined;
+  }
+
+  const latest = normalized.slice(-6);
+  const earlier = normalized.slice(0, -6);
+
+  const userHighlights = earlier
+    .map((line, index) => ({ line, index }))
+    .filter(({ index }) => messages[index].sender === 'user')
+    .slice(-3)
+    .map(({ line }) => `• Usuario preguntó: ${truncateText(line.replace(/^Usuario:\s*/, ''), 160)}`);
+
+  const assistantHighlights = earlier
+    .map((line, index) => ({ line, index }))
+    .filter(({ index }) => messages[index].sender === 'ai')
+    .slice(-3)
+    .map(({ line }) => `• Asistente respondió: ${truncateText(line.replace(/^Asistente:\s*/, ''), 160)}`);
+
+  return [
+    'Ideas clave previas:',
+    ...userHighlights,
+    ...assistantHighlights,
+    '',
+    'Intercambios recientes:',
+    ...latest,
+  ]
+    .filter(Boolean)
     .join('\n');
+};
+
+const decorateAssistantResponse = (
+  baseResponse: string,
+  snapshot: DemoUsageSnapshot | null,
+  limitValue: number,
+  getDemoResetLabel?: (isoDate?: string | null) => string
+): { content: string; decoratedHtml?: string } => {
+  if (!snapshot) {
+    return { content: baseResponse };
+  }
+
+  const remaining = Math.max(snapshot.remaining, 0);
+  const resetLabel = getDemoResetLabel ? getDemoResetLabel(snapshot.resetsOn) : 'el próximo ciclo';
+  const footnote = `Demo: te quedan ${remaining} de ${limitValue} interacciones de IA hasta ${resetLabel}.`;
+
+  return {
+    content: `${baseResponse}\n\n${footnote}`,
+    decoratedHtml: `${baseResponse}\n\n<span class="text-xs text-gray-500">${footnote}</span>`,
+  };
+};
+
+const CACHE_HISTORY_TURNS = 4;
+
+const buildCacheKey = (
+  signature: string,
+  history: AssistantConversationTurn[],
+  question: string
+): string => {
+  const historySignature = history
+    .slice(-CACHE_HISTORY_TURNS)
+    .map(turn => `${turn.role}:${sanitizeForSearch(turn.content)}`)
+    .join('|');
+  return `${signature}::${historySignature}::${sanitizeForSearch(question)}`;
 };
 
 const formatTransactionsTable = (
@@ -173,7 +268,17 @@ const resolveLocalAnswer = (question: string, knowledge: KnowledgeBase): string 
   return null;
 };
 
-const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners }) => {
+const AiAssistant: React.FC<AiAssistantProps> = ({
+  items,
+  transactions,
+  partners,
+  demoLimit,
+  demoUsage,
+  onRefreshDemoUsage,
+  onConsumeDemoUsage,
+  isDemoAccount = false,
+  getDemoResetLabel,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [userInput, setUserInput] = useState('');
@@ -182,6 +287,14 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
   const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
   const aiAvailable = isRemoteProviderConfigured();
   const providerLabel = getProviderLabel();
+
+  const conversationSummaryRef = useRef<string>('');
+  const cachedAnswersRef = useRef<Map<string, string>>(new Map());
+
+  const updateConversation = (nextMessages: Message[]) => {
+    setMessages(nextMessages);
+    conversationSummaryRef.current = summarizeConversation(nextMessages);
+  };
 
   const knowledge = useMemo<KnowledgeBase>(() => {
     const stockMap = new Map<string, number>();
@@ -291,8 +404,6 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
     };
   }, [items, transactions, partners]);
 
-  const cachedAnswersRef = useRef<Map<string, string>>(new Map());
-  
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -300,56 +411,145 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
   const handleSend = async () => {
     if (!userInput.trim() || isLoading) return;
 
-    const userMessage = userInput;
-    const newMessages: Message[] = [...messages, { sender: 'user', text: userMessage }];
-    setMessages(newMessages);
+    const userMessage = userInput.trim();
+    const historyTurns = mapMessagesToTurns(messages).slice(-MAX_MEMORY_TURNS);
+    const newMessages: Message[] = [...messages, { sender: 'user', content: userMessage }];
+    updateConversation(newMessages);
     setUserInput('');
 
     const localAnswer = resolveLocalAnswer(userMessage, knowledge);
     if (localAnswer) {
-      setMessages([...newMessages, { sender: 'ai', text: localAnswer }]);
+      updateConversation([...newMessages, { sender: 'ai', content: localAnswer }]);
       return;
     }
 
     if (!aiAvailable) {
-      setMessages([
+      updateConversation([
         ...newMessages,
-        { sender: 'ai', text: `La integración con ${providerLabel} no está configurada. Configura las credenciales correspondientes para habilitar el asistente.` },
+        {
+          sender: 'ai',
+          content: `La integración con ${providerLabel} no está configurada. Configura las credenciales correspondientes para habilitar el asistente.`,
+        },
       ]);
       return;
     }
 
     if (!canUseRemoteAnalysis('assistant')) {
-      const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
+      const resetMessage = usageState?.resetsOn
+        ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
+        : 'el próximo ciclo';
       const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
-      setMessages([
+      updateConversation([
         ...newMessages,
-        { sender: 'ai', text: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).` }
+        {
+          sender: 'ai',
+          content: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
+        },
       ]);
       return;
     }
 
-    const cacheKey = `${knowledge.signature}::${sanitizeForSearch(userMessage)}`;
+    const guardDemoUsage = Boolean(isDemoAccount && (demoLimit ?? null) !== null);
+    const limitValue = demoLimit ?? DEMO_UPLOAD_LIMIT;
+    let latestDemoSnapshot: DemoUsageSnapshot | null = demoUsage ?? null;
+
+    const sendDemoLimitReached = (snapshot?: DemoUsageSnapshot | null) => {
+      const resetLabel = getDemoResetLabel ? getDemoResetLabel(snapshot?.resetsOn) : 'el próximo ciclo';
+      updateConversation([
+        ...newMessages,
+        {
+          sender: 'ai',
+          decoratedHtml: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a <a href="mailto:info@puntolimpio.ar">info@puntolimpio.ar</a> para ampliar el acceso.`,
+          content: `Alcanzaste el máximo de ${limitValue} interacciones con IA disponibles en la experiencia demo. El cupo se restablece ${resetLabel}. Escribinos a info@puntolimpio.ar para ampliar el acceso.`,
+        },
+      ]);
+    };
+
+    if (guardDemoUsage) {
+      if (latestDemoSnapshot && latestDemoSnapshot.remaining <= 0) {
+        sendDemoLimitReached(latestDemoSnapshot);
+        return;
+      }
+
+      if (onRefreshDemoUsage) {
+        try {
+          const refreshed = await onRefreshDemoUsage();
+          if (refreshed) {
+            latestDemoSnapshot = refreshed;
+          }
+          if (latestDemoSnapshot && latestDemoSnapshot.remaining <= 0) {
+            sendDemoLimitReached(latestDemoSnapshot);
+            return;
+          }
+        } catch (error) {
+          console.warn('No se pudo verificar el límite demo para el asistente.', error);
+        }
+      }
+    }
+
+    const cacheKey = buildCacheKey(knowledge.signature, historyTurns, userMessage);
     const cached = cachedAnswersRef.current.get(cacheKey);
+
+    const deliverResponse = async (baseResponse: string, consumeDemo: boolean) => {
+      if (guardDemoUsage && consumeDemo && onConsumeDemoUsage) {
+        try {
+          const updatedSnapshot = await onConsumeDemoUsage();
+          if (updatedSnapshot) {
+            latestDemoSnapshot = updatedSnapshot;
+          } else if (latestDemoSnapshot) {
+            latestDemoSnapshot = {
+              ...latestDemoSnapshot,
+              remaining: Math.max(latestDemoSnapshot.remaining - 1, 0),
+            };
+          }
+        } catch (error) {
+          console.warn('No se pudo actualizar el consumo demo para el asistente.', error);
+        }
+      }
+
+      recordRemoteUsage('assistant');
+
+      const decoration = guardDemoUsage
+        ? decorateAssistantResponse(baseResponse, latestDemoSnapshot, limitValue, getDemoResetLabel)
+        : { content: baseResponse };
+
+      updateConversation([
+        ...newMessages,
+        {
+          sender: 'ai',
+          content: decoration.content,
+          decoratedHtml: decoration.decoratedHtml,
+        },
+      ]);
+    };
+
     if (cached) {
-      setMessages([...newMessages, { sender: 'ai', text: cached }]);
+      setIsLoading(true);
+      try {
+        await deliverResponse(cached, guardDemoUsage);
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const historySnippet = buildHistorySnippet(messages.slice(-6));
-      const prompt = historySnippet
-        ? `${historySnippet}\nUsuario: ${userMessage}`
-        : userMessage;
-      const aiResponse = await getAiAssistantResponse(knowledge.contextJson, prompt);
+      const aiResponse = await getAiAssistantResponse(
+        knowledge.contextJson,
+        userMessage,
+        historyTurns,
+        conversationSummaryRef.current
+      );
       cachedAnswersRef.current.set(cacheKey, aiResponse);
-      recordRemoteUsage('assistant');
-      setMessages([...newMessages, { sender: 'ai', text: aiResponse }]);
+      await deliverResponse(aiResponse, guardDemoUsage);
     } catch (error) {
       console.error('AI Assistant error:', error);
-      setMessages([...newMessages, { sender: 'ai', text: 'Lo siento, ocurrió un error. Intenta de nuevo.' }]);
+      updateConversation([
+        ...newMessages,
+        { sender: 'ai', content: 'Lo siento, ocurrió un error. Intenta de nuevo.' },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -398,7 +598,12 @@ const AiAssistant: React.FC<AiAssistantProps> = ({ items, transactions, partners
                     {messages.map((msg, index) => (
                         <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-md p-3 rounded-2xl ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none'}`}>
-                                <div className="prose prose-sm dark:prose-invert" dangerouslySetInnerHTML={{ __html: msg.text.replace(/\n/g, '<br />') }} />
+                                <div
+                                  className="prose prose-sm dark:prose-invert"
+                                  dangerouslySetInnerHTML={{
+                                    __html: (msg.decoratedHtml ?? msg.content).replace(/\n/g, '<br />'),
+                                  }}
+                                />
                             </div>
                         </div>
                     ))}
