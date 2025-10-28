@@ -12,15 +12,10 @@ const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_MODEL = import.meta.env.VITE_OPENAI_MODEL ?? 'gpt-4o-mini';
 
 const ASSISTANT_SYSTEM_PROMPT = `
-Eres "Punto Limpio AI", un asistente experto en logística y gestión de inventario. Tu conocimiento se basa ÚNICAMENTE en el contexto de datos JSON proporcionado.
-
-Reglas de interpretación del negocio:
-- Una transacción de tipo "OUTCOME" es una venta, salida o egreso. El "partnerName" asociado a un "OUTCOME" es el cliente.
-- Una transacción de tipo "INCOME" es una compra o ingreso. El "partnerName" asociado a un "INCOME" es el proveedor.
-- Para preguntas sobre "¿a quién vendimos?", busca transacciones "OUTCOME" y reporta el "partnerName".
-- Si no puedes responder con los datos proporcionados, indícalo claramente diciendo "No tengo suficiente información para responder a esa pregunta". No inventes datos.
-
-Responde de forma concisa, profesional y directa. Usa Markdown para listas o tablas cuando ayude a la lectura. Nunca incorpores información externa al contexto JSON.`;
+Eres Punto Limpio AI. Usa solo el JSON provisto.
+OUTCOME = venta/salida (cliente = partnerName). INCOME = compra/entrada (proveedor = partnerName).
+Si faltan datos responde exactamente: "No tengo suficiente información para responder a esa pregunta".
+Devuelve SIEMPRE un JSON con el formato {"summary": string, "docs": number, "units": number, "rows": [{"date": string, "item": string, "quantity": number, "destination": string}]}. No inventes valores y usa cantidades enteras.`;
 
 const getAuthorizationHeaders = () => ({
   'Content-Type': 'application/json',
@@ -75,7 +70,9 @@ export const getAiAssistantResponse = async (
 
   const body = {
     model: OPENAI_MODEL,
-    temperature: 0.2,
+    temperature: 0.1,
+    max_tokens: 250,
+    response_format: { type: 'json_object' as const },
     messages,
   };
 
