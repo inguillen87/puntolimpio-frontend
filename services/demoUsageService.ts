@@ -1,5 +1,5 @@
 import { doc, runTransaction } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../firebaseConfig';
+import { db, isAppCheckConfigured, isFirebaseConfigured } from '../firebaseConfig';
 
 const STORAGE_KEY = 'punto-limpio-demo-uploads-v2';
 const COLLECTION = 'demoUsageLimits';
@@ -203,17 +203,24 @@ const ensureRemoteSnapshot = async (
   });
 };
 
+let warnedLocalFallback = false;
+
 const ensureSnapshot = async (
   scope: DemoUsageScope,
   limit: number,
   mutator?: RecordMutator
 ): Promise<DemoUsageSnapshot> => {
-  if (isFirebaseConfigured) {
+  if (isFirebaseConfigured && isAppCheckConfigured) {
     try {
       return await ensureRemoteSnapshot(scope, limit, mutator);
     } catch (error) {
       console.warn('Fallo el control remoto de cuota demo, se usará almacenamiento local.', error);
     }
+  } else if (!warnedLocalFallback && isFirebaseConfigured && !isAppCheckConfigured) {
+    warnedLocalFallback = true;
+    console.warn(
+      'Firebase App Check no está disponible (clave faltante o dominio no autorizado). Los límites demo usarán almacenamiento local hasta corregir la configuración.'
+    );
   }
   return ensureLocalSnapshot(scope, limit, mutator);
 };

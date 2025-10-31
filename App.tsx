@@ -108,7 +108,7 @@ const AppContent: React.FC = () => {
   const [viewingAsOrgId, setViewingAsOrgId] = useState<string | null>(null);
   const [itemsForQrModal, setItemsForQrModal] = useState<Item[] | null>(null);
   const [demoUsage, setDemoUsage] = useState<DemoUsageSnapshot | null>(null);
-  const { setActiveOrganization, updatePlan } = useUsageLimits();
+  const { setActiveOrganization, refreshUsage, registerMediaConsumption } = useUsageLimits();
 
   const demoAccountConfig = useMemo(() => getDemoAccountConfig(currentUser?.email), [currentUser?.email]);
   const demoLimit = demoAccountConfig?.limit ?? DEMO_UPLOAD_LIMIT;
@@ -236,15 +236,12 @@ const AppContent: React.FC = () => {
   }, [buildDemoUsageScope, demoAccountConfig, loadDemoUsageSnapshot]);
 
   useEffect(() => {
-    if (organization?.id) {
-      setActiveOrganization(organization.id, organization.usagePlan);
-      if (organization.usagePlan) {
-        updatePlan(organization.usagePlan);
-      }
+    if (organization?.id && currentUser?.id) {
+      setActiveOrganization(organization.id, currentUser.id);
     } else {
       setActiveOrganization(null);
     }
-  }, [organization, setActiveOrganization, updatePlan]);
+  }, [organization?.id, currentUser?.id, setActiveOrganization]);
 
   const showNotification = (message: React.ReactNode, isError: boolean = false) => {
     setNotification(message);
@@ -496,13 +493,34 @@ const AppContent: React.FC = () => {
     }
 
     let documentUrl = '';
+    let usedRemoteUpload = false;
+    let fallbackNotice: React.ReactNode | null = null;
     if (documentFile) {
+        const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
         try {
-            const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
-            documentUrl = await databaseService.uploadFile(documentFile, fileName);
+            documentUrl = await databaseService.uploadFile(documentFile, fileName, orgId);
+            usedRemoteUpload = isFirebaseConfigured;
         } catch (error: any) {
-             showNotification(`Falló la subida del archivo: ${error.code || error.message}`, true);
-             throw error;
+            if (error?.code === 'appcheck/not-configured') {
+                console.warn(
+                    'App Check no está operativo; se utilizará la subida local como fallback para completar el flujo.',
+                    error
+                );
+                documentUrl = await mockDb.uploadFile(documentFile, fileName, orgId);
+                fallbackNotice = (
+                    <p className="mt-2 text-yellow-200">
+                        Subida en modo demo: configurá <code>VITE_FIREBASE_APPCHECK_SITE_KEY</code> y autorizá este dominio en reCAPTCHA v3 para volver a usar el almacenamiento seguro.
+                    </p>
+                );
+            } else {
+                showNotification(`Falló la subida del archivo: ${error.code || error.message}`, true);
+                throw error;
+            }
+        }
+
+        if (usedRemoteUpload) {
+            registerMediaConsumption();
+            await refreshUsage();
         }
     }
 
@@ -601,6 +619,14 @@ const AppContent: React.FC = () => {
             </div>
           );
         }
+        if (fallbackNotice) {
+          notificationMessage = (
+            <div>
+              {notificationMessage}
+              {fallbackNotice}
+            </div>
+          );
+        }
 
         showNotification(notificationMessage);
         setActiveTab('analytics'); // Go to analytics to see the changes
@@ -691,6 +717,14 @@ const AppContent: React.FC = () => {
             <div>
               {successMessage}
               {updatedSnapshot ? renderDemoUsageNote(updatedSnapshot) : null}
+            </div>
+          );
+        }
+        if (fallbackNotice) {
+          successMessage = (
+            <div>
+              {successMessage}
+              {fallbackNotice}
             </div>
           );
         }
