@@ -10,7 +10,7 @@ import { getFunctions } from "firebase/functions";
 // User-provided Firebase config
 export const firebaseConfig = {
   apiKey: "AIzaSyDhvEuoA2qdnrF7TsmCLC3ewCv_tyaHLYU",
-  authDomain: "punto-limpio-5a939.firebaseapp.com",
+  authDomain: "punto-limpio-5a939.firebasestorage.app",
   projectId: "punto-limpio-5a939",
   storageBucket: "punto-limpio-5a939.firebasestorage.app",
   messagingSenderId: "1085395296235",
@@ -34,6 +34,8 @@ let functions = null;
 const APP_CHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
 const APP_CHECK_DEBUG_TOKEN = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
 
+export const isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY);
+
 // Initialize Firebase only if the configuration has been changed from the default.
 try {
     if (isFirebaseConfigured) {
@@ -49,7 +51,7 @@ try {
                     isTokenAutoRefreshEnabled: true,
                 });
             } else {
-                console.warn(
+                console.error(
                     "Firebase App Check requiere una clave de sitio ReCAPTCHA v3 (VITE_FIREBASE_APPCHECK_SITE_KEY). Las Functions protegidas fallarán sin ella."
                 );
             }
@@ -59,7 +61,7 @@ try {
         db = initializeFirestore(app, { ignoreUndefinedProperties: true });
         storage = getStorage(app);
         auth = getAuth(app);
-        functions = getFunctions(app, "southamerica-east1");
+        functions = isAppCheckConfigured ? getFunctions(app, "southamerica-east1") : null;
     }
 } catch (e) {
     console.error("Error al inicializar Firebase. Por favor, verifica tu configuración.", e);

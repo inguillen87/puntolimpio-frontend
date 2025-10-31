@@ -92,6 +92,10 @@ export const uploadFile = async (file: File, path: string, organizationId: strin
 
         throw lastError instanceof Error ? lastError : new Error('UNKNOWN_DOWNLOAD_URL_ERROR');
     } catch (error: any) {
+        if (error?.code === 'appcheck/not-configured') {
+            error.message =
+                'Firebase App Check no está configurado en el front. Definí VITE_FIREBASE_APPCHECK_SITE_KEY antes de subir archivos protegidos.';
+        }
         console.error("[DB Service] ERROR CRÍTICO AL SUBIR:", {
             message: error.message,
             code: error.code,

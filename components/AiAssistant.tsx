@@ -1125,7 +1125,9 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
       const errorCode = typeof error?.code === 'string' ? error.code : '';
       const errorMessage = typeof error?.message === 'string' ? error.message : '';
       let reason = 'No se pudo validar el crédito del asistente remoto.';
-      if (errorMessage.includes('NO_CREDIT') || errorCode === 'functions/permission-denied') {
+      if (errorCode === 'appcheck/not-configured') {
+        reason = 'App Check no está configurado. Definí VITE_FIREBASE_APPCHECK_SITE_KEY para habilitar el asistente remoto.';
+      } else if (errorMessage.includes('NO_CREDIT') || errorCode === 'functions/permission-denied') {
         reason = 'No quedan créditos activos para el asistente remoto.';
       } else if (errorMessage.includes('UNAUTHENTICATED') || errorCode === 'functions/unauthenticated') {
         reason = 'La sesión actual no está autenticada para el asistente remoto.';

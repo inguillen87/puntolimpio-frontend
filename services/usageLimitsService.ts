@@ -1,13 +1,27 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable, HttpsCallable } from 'firebase/functions';
-import { db, functions as cloudFunctions } from '../firebaseConfig';
+import { db, functions as cloudFunctions, isAppCheckConfigured } from '../firebaseConfig';
 import { UsageLimitsState } from '../types';
 
 export type UsageServiceCategory = 'document' | 'assistant';
 
+const createAppCheckError = (): Error & { code?: string } => {
+  const error = new Error(
+    'Firebase App Check no está configurado. Agregá la variable VITE_FIREBASE_APPCHECK_SITE_KEY para habilitar las funciones protegidas.'
+  ) as Error & { code?: string };
+  error.code = 'appcheck/not-configured';
+  return error;
+};
+
 const ensureFunctions = () => {
   if (!cloudFunctions) {
+    if (!isAppCheckConfigured) {
+      throw createAppCheckError();
+    }
     throw new Error('FUNCTIONS_NOT_CONFIGURED');
+  }
+  if (!isAppCheckConfigured) {
+    throw createAppCheckError();
   }
   return cloudFunctions;
 };
