@@ -184,11 +184,6 @@ export interface DailyUsage {
     count: number;
 }
 
-export interface UsageCounters {
-    documentScans: number;
-    assistantSessions: number;
-}
-
 export interface UsagePlanSeed {
     planName?: string;
     monthlyQuota?: number;
@@ -199,16 +194,10 @@ export interface UsagePlanSeed {
 
 export interface UsageLimitsState {
     organizationId: string;
-    planName: string;
-    monthlyQuota: number;
-    dailyQuota?: number;
-    perMinuteQuota?: number;
-    used: number;
-    remaining: number;
-    resetsOn: string;
-    degradeMode: boolean;
-    degradeReason?: string;
-    lastUpdated: string;
-    counters: UsageCounters;
-    upgradeRequestedAt?: string;
+    userId: string;
+    period: string;
+    chatRemaining: number | null;
+    mediaRemaining: number | null;
+    resetAt: string | null;
+    lastSyncedAt: string;
 }
