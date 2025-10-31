@@ -41,8 +41,9 @@ let appCheckWarningLogged = false;
 
 const APP_CHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
 const APP_CHECK_DEBUG_TOKEN = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
+const APP_CHECK_FORCE_DISABLE = String(import.meta.env.VITE_FIREBASE_DISABLE_APPCHECK || '').toLowerCase() === 'true';
 
-export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY);
+export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY) && !APP_CHECK_FORCE_DISABLE;
 
 const logAppCheckMisconfiguration = (error?: unknown) => {
   if (appCheckWarningLogged) {
@@ -50,7 +51,9 @@ const logAppCheckMisconfiguration = (error?: unknown) => {
   }
   appCheckWarningLogged = true;
   const hint =
-    "Firebase App Check no está operativo. Verificá que VITE_FIREBASE_APPCHECK_SITE_KEY esté definido y que el dominio actual esté habilitado en la consola de reCAPTCHA v3.";
+    APP_CHECK_FORCE_DISABLE
+      ? "Firebase App Check está deshabilitado manualmente (VITE_FIREBASE_DISABLE_APPCHECK=true). Revertí el cambio para volver a proteger las funciones en la nube."
+      : "Firebase App Check no está operativo. Verificá que VITE_FIREBASE_APPCHECK_SITE_KEY esté definido y que el dominio actual esté habilitado en la consola de reCAPTCHA v3.";
   if (error) {
     console.error(hint, error);
   } else {
@@ -73,7 +76,10 @@ try {
                 (window as any).FIREBASE_APPCHECK_DEBUG_TOKEN = APP_CHECK_DEBUG_TOKEN;
             }
 
-            if (APP_CHECK_SITE_KEY) {
+            if (APP_CHECK_FORCE_DISABLE) {
+                isAppCheckConfigured = false;
+                logAppCheckMisconfiguration();
+            } else if (APP_CHECK_SITE_KEY) {
                 try {
                     appCheckInstance = initializeAppCheck(app, {
                         provider: new ReCaptchaV3Provider(APP_CHECK_SITE_KEY),
