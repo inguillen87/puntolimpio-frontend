@@ -39,6 +39,9 @@ let auth = null;
 let functions = null;
 let appCheckInstance: AppCheck | null = null;
 let appCheckWarningLogged = false;
+let appCheckTokenStatus: "missing" | "pending" | "success" | "error" =
+  APP_CHECK_SITE_KEY ? "pending" : "missing";
+let appCheckLastError: { code?: string; message?: string } | null = null;
 
 const APP_CHECK_SITE_KEY = (import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? "").trim();
 const APP_CHECK_DEBUG_TOKEN = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN ?? "").trim();
@@ -57,6 +60,29 @@ const APP_CHECK_PROVIDER_LABEL =
     : "reCAPTCHA v3";
 export const appCheckProviderLabel = APP_CHECK_PROVIDER_LABEL;
 
+const publishAppCheckSnapshot = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const previewKey = APP_CHECK_SITE_KEY
+    ? `${APP_CHECK_SITE_KEY.slice(0, 6)}…${APP_CHECK_SITE_KEY.slice(-4)}`
+    : null;
+
+  (window as any).__PUNTO_LIMPIO_APP_CHECK__ = {
+    provider: APP_CHECK_PROVIDER_LABEL,
+    siteKeyPresent: Boolean(APP_CHECK_SITE_KEY),
+    siteKeyPreview: previewKey,
+    disableFlag: APP_CHECK_FORCE_DISABLE,
+    debugTokenPresent: Boolean(APP_CHECK_DEBUG_TOKEN),
+    isProductionBundle: IS_PRODUCTION_BUNDLE,
+    tokenStatus: appCheckTokenStatus,
+    lastErrorCode: appCheckLastError?.code ?? null,
+    lastErrorMessage: appCheckLastError?.message ?? null,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+};
+
 if (
   typeof window !== "undefined" &&
   APP_CHECK_PROVIDER !== RESOLVED_APPCHECK_PROVIDER &&
@@ -68,6 +94,8 @@ if (
 }
 
 export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY) && !APP_CHECK_FORCE_DISABLE;
+
+publishAppCheckSnapshot();
 
 const buildSiteKeyFix = () =>
   [
@@ -137,6 +165,9 @@ const buildAppCheckHint = (error?: unknown): string => {
 };
 
 const logAppCheckMisconfiguration = (error?: unknown) => {
+  appCheckTokenStatus = APP_CHECK_SITE_KEY ? "error" : "missing";
+  appCheckLastError = error ? normalizeError(error) : null;
+  publishAppCheckSnapshot();
   if (appCheckWarningLogged) {
     return;
   }
@@ -181,6 +212,9 @@ try {
 
                     void getToken(appCheckInstance)
                         .then(() => {
+                            appCheckTokenStatus = "success";
+                            appCheckLastError = null;
+                            publishAppCheckSnapshot();
                             hydrateFunctions();
                         })
                         .catch((error) => {
