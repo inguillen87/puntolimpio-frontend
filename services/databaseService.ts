@@ -47,11 +47,17 @@ const removeUndefinedFields = (obj: any): any => {
 // --- Firebase Storage Integration ---
 const storage = getStorage();
 
-export const uploadFile = async (file: File, path: string): Promise<string> => {
-    console.log(`[DB Service] Intentando subir archivo a: ${path}`);
+const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+export const uploadFile = async (file: File, path: string, organizationId: string): Promise<string> => {
+    if (!organizationId) {
+        throw new Error('MISSING_ORG');
+    }
+
+    console.log(`[DB Service] Intentando subir archivo a: ${path} (org=${organizationId})`);
     try {
         const contentType = file.type || 'application/octet-stream';
-        const { uploadUrl, path: remotePath } = await requestSignedUploadUrl(contentType);
+        const { uploadUrl, path: remotePath } = await requestSignedUploadUrl(contentType, organizationId);
         const response = await fetch(uploadUrl, {
             method: 'PUT',
             headers: { 'Content-Type': contentType },
@@ -64,9 +70,27 @@ export const uploadFile = async (file: File, path: string): Promise<string> => {
         }
 
         const storageRef = ref(storage, remotePath);
-        const downloadURL = await getDownloadURL(storageRef);
-        console.log(`[DB Service] Archivo subido con éxito. URL: ${downloadURL}`);
-        return downloadURL;
+        const maxAttempts = 3;
+        let lastError: unknown = null;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                const downloadURL = await getDownloadURL(storageRef);
+                console.log(`[DB Service] Archivo subido con éxito. URL: ${downloadURL}`);
+                return downloadURL;
+            } catch (error) {
+                lastError = error;
+                if (attempt < maxAttempts - 1) {
+                    const backoff = 200 * (attempt + 1);
+                    console.warn(`getDownloadURL falló, reintentando en ${backoff}ms...`, error);
+                    await wait(backoff);
+                    continue;
+                }
+                throw error;
+            }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error('UNKNOWN_DOWNLOAD_URL_ERROR');
     } catch (error: any) {
         console.error("[DB Service] ERROR CRÍTICO AL SUBIR:", {
             message: error.message,

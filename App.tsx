@@ -496,7 +496,7 @@ const AppContent: React.FC = () => {
     if (documentFile) {
         try {
             const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
-            documentUrl = await databaseService.uploadFile(documentFile, fileName);
+            documentUrl = await databaseService.uploadFile(documentFile, fileName, orgId);
             registerMediaConsumption();
             await refreshUsage();
         } catch (error: any) {

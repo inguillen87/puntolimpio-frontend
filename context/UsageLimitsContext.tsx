@@ -55,7 +55,13 @@ export const UsageLimitsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [syncUsage]);
 
   const consumeChatCredit = useCallback(async () => {
-    const remaining = await serviceConsumeChatCredit();
+    const orgId = activeOrgIdRef.current;
+    const userId = activeUserIdRef.current;
+    if (!orgId || !userId) {
+      throw new Error('NO_USAGE_CONTEXT');
+    }
+
+    const remaining = await serviceConsumeChatCredit(orgId);
     let updated = false;
     setUsageState(prev => {
       if (!prev) return prev;

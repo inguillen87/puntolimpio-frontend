@@ -85,19 +85,22 @@ export const canUseRemoteAnalysis = (
   return state.mediaRemaining === null || state.mediaRemaining > 0;
 };
 
-let consumeChatCallable: HttpsCallable<unknown, { remaining: number }> | null = null;
-let signedUploadCallable: HttpsCallable<{ contentType: string }, SignedUploadDetails> | null = null;
+let consumeChatCallable: HttpsCallable<{ orgId: string }, { remaining: number }> | null = null;
+let signedUploadCallable: HttpsCallable<{ contentType: string; orgId: string }, SignedUploadDetails> | null = null;
 
 const ensureConsumeChatCallable = () => {
   if (!consumeChatCallable) {
-    consumeChatCallable = httpsCallable<unknown, { remaining: number }>(ensureFunctions(), 'consumeChatCredit');
+    consumeChatCallable = httpsCallable<{ orgId: string }, { remaining: number }>(
+      ensureFunctions(),
+      'consumeChatCredit'
+    );
   }
   return consumeChatCallable;
 };
 
 const ensureSignedUploadCallable = () => {
   if (!signedUploadCallable) {
-    signedUploadCallable = httpsCallable<{ contentType: string }, SignedUploadDetails>(
+    signedUploadCallable = httpsCallable<{ contentType: string; orgId: string }, SignedUploadDetails>(
       ensureFunctions(),
       'getSignedUploadUrl'
     );
@@ -105,9 +108,12 @@ const ensureSignedUploadCallable = () => {
   return signedUploadCallable;
 };
 
-export const consumeChatCredit = async (): Promise<number> => {
+export const consumeChatCredit = async (organizationId: string): Promise<number> => {
+  if (!organizationId) {
+    throw new Error('MISSING_ORG');
+  }
   const callable = ensureConsumeChatCallable();
-  const result = await callable();
+  const result = await callable({ orgId: organizationId });
   const remaining = (result.data as { remaining?: unknown })?.remaining;
   if (typeof remaining !== 'number') {
     throw new Error('INVALID_RESPONSE');
@@ -121,9 +127,15 @@ export interface SignedUploadDetails {
   contentType: string;
 }
 
-export const requestSignedUploadUrl = async (contentType: string): Promise<SignedUploadDetails> => {
+export const requestSignedUploadUrl = async (
+  contentType: string,
+  organizationId: string
+): Promise<SignedUploadDetails> => {
+  if (!organizationId) {
+    throw new Error('MISSING_ORG');
+  }
   const callable = ensureSignedUploadCallable();
-  const result = await callable({ contentType });
+  const result = await callable({ contentType, orgId: organizationId });
   const data = result.data as Partial<SignedUploadDetails> | null | undefined;
   if (!data || typeof data.uploadUrl !== 'string' || typeof data.path !== 'string') {
     throw new Error('INVALID_RESPONSE');
