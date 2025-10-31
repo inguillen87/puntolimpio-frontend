@@ -1,6 +1,12 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import {
+  AppCheck,
+  getToken,
+  initializeAppCheck,
+  ReCaptchaV3Provider,
+  setTokenAutoRefreshEnabled,
+} from "firebase/app-check";
 // FIX: Import initializeFirestore to allow passing configuration options
 import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -30,11 +36,33 @@ let db = null;
 let storage = null;
 let auth = null;
 let functions = null;
+let appCheckInstance: AppCheck | null = null;
+let appCheckWarningLogged = false;
 
 const APP_CHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
 const APP_CHECK_DEBUG_TOKEN = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
 
-export const isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY);
+export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY);
+
+const logAppCheckMisconfiguration = (error?: unknown) => {
+  if (appCheckWarningLogged) {
+    return;
+  }
+  appCheckWarningLogged = true;
+  const hint =
+    "Firebase App Check no está operativo. Verificá que VITE_FIREBASE_APPCHECK_SITE_KEY esté definido y que el dominio actual esté habilitado en la consola de reCAPTCHA v3.";
+  if (error) {
+    console.error(hint, error);
+  } else {
+    console.error(hint);
+  }
+};
+
+const hydrateFunctions = () => {
+  if (!functions && app && isAppCheckConfigured) {
+    functions = getFunctions(app, "southamerica-east1");
+  }
+};
 
 // Initialize Firebase only if the configuration has been changed from the default.
 try {
@@ -46,14 +74,31 @@ try {
             }
 
             if (APP_CHECK_SITE_KEY) {
-                initializeAppCheck(app, {
-                    provider: new ReCaptchaV3Provider(APP_CHECK_SITE_KEY),
-                    isTokenAutoRefreshEnabled: true,
-                });
+                try {
+                    appCheckInstance = initializeAppCheck(app, {
+                        provider: new ReCaptchaV3Provider(APP_CHECK_SITE_KEY),
+                        isTokenAutoRefreshEnabled: true,
+                    });
+
+                    void getToken(appCheckInstance)
+                        .then(() => {
+                            hydrateFunctions();
+                        })
+                        .catch((error) => {
+                            isAppCheckConfigured = false;
+                            functions = null;
+                            logAppCheckMisconfiguration(error);
+                            if (appCheckInstance) {
+                                setTokenAutoRefreshEnabled(appCheckInstance, false);
+                            }
+                        });
+                } catch (error) {
+                    isAppCheckConfigured = false;
+                    logAppCheckMisconfiguration(error);
+                }
             } else {
-                console.error(
-                    "Firebase App Check requiere una clave de sitio ReCAPTCHA v3 (VITE_FIREBASE_APPCHECK_SITE_KEY). Las Functions protegidas fallarán sin ella."
-                );
+                isAppCheckConfigured = false;
+                logAppCheckMisconfiguration();
             }
         }
 
@@ -61,7 +106,7 @@ try {
         db = initializeFirestore(app, { ignoreUndefinedProperties: true });
         storage = getStorage(app);
         auth = getAuth(app);
-        functions = isAppCheckConfigured ? getFunctions(app, "southamerica-east1") : null;
+        hydrateFunctions();
     }
 } catch (e) {
     console.error("Error al inicializar Firebase. Por favor, verifica tu configuración.", e);

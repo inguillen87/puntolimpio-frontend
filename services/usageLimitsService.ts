@@ -7,7 +7,7 @@ export type UsageServiceCategory = 'document' | 'assistant';
 
 const createAppCheckError = (): Error & { code?: string } => {
   const error = new Error(
-    'Firebase App Check no está configurado. Agregá la variable VITE_FIREBASE_APPCHECK_SITE_KEY para habilitar las funciones protegidas.'
+    'Firebase App Check no está operativo. Asegurate de definir VITE_FIREBASE_APPCHECK_SITE_KEY y de autorizar este dominio en reCAPTCHA v3 antes de usar funciones protegidas.'
   ) as Error & { code?: string };
   error.code = 'appcheck/not-configured';
   return error;

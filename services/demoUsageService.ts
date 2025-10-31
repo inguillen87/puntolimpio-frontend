@@ -219,7 +219,7 @@ const ensureSnapshot = async (
   } else if (!warnedLocalFallback && isFirebaseConfigured && !isAppCheckConfigured) {
     warnedLocalFallback = true;
     console.warn(
-      'Firebase App Check no está configurado; los límites demo usarán almacenamiento local hasta que se provea VITE_FIREBASE_APPCHECK_SITE_KEY.'
+      'Firebase App Check no está disponible (clave faltante o dominio no autorizado). Los límites demo usarán almacenamiento local hasta corregir la configuración.'
     );
   }
   return ensureLocalSnapshot(scope, limit, mutator);
