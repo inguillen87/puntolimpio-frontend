@@ -17,9 +17,9 @@ import { getFunctions } from "firebase/functions";
 // User-provided Firebase config
 export const firebaseConfig = {
   apiKey: "AIzaSyDhvEuoA2qdnrF7TsmCLC3ewCv_tyaHLYU",
-  authDomain: "punto-limpio-5a939.firebasestorage.app",
+  authDomain: "punto-limpio-5a939.firebaseapp.com",
   projectId: "punto-limpio-5a939",
-  storageBucket: "punto-limpio-5a939.appspot.com",
+  storageBucket: "punto-limpio-5a939.firebasestorage.app",
   messagingSenderId: "1085395296235",
   appId: "1:1085395296235:web:bc1f776549e16d0ee443ae",
   measurementId: "G-YB4S9KVSDN"
@@ -31,6 +31,9 @@ export const isFirebaseConfigured =
     firebaseConfig.apiKey &&
     !firebaseConfig.apiKey.startsWith("TU_");
 const APP_CHECK_SITE_KEY = (import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? "").trim();
+const APP_CHECK_SITE_KEY_PREVIEW = APP_CHECK_SITE_KEY
+  ? `${APP_CHECK_SITE_KEY.slice(0, 6)}…${APP_CHECK_SITE_KEY.slice(-4)}`
+  : null;
 const APP_CHECK_DEBUG_TOKEN = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN ?? "").trim();
 const IS_PRODUCTION_BUNDLE = Boolean(import.meta.env.PROD || import.meta.env.MODE === "production");
 const APP_CHECK_FORCE_DISABLE =
@@ -46,6 +49,7 @@ const APP_CHECK_PROVIDER_LABEL =
     ? "reCAPTCHA Enterprise"
     : "reCAPTCHA v3";
 export const appCheckProviderLabel = APP_CHECK_PROVIDER_LABEL;
+export const appCheckSiteKeyPreview = APP_CHECK_SITE_KEY_PREVIEW;
 
 let appCheckInstance: AppCheck | null = null;
 let appCheckWarningLogged = false;
@@ -64,14 +68,10 @@ const publishAppCheckSnapshot = () => {
     return;
   }
 
-  const previewKey = APP_CHECK_SITE_KEY
-    ? `${APP_CHECK_SITE_KEY.slice(0, 6)}…${APP_CHECK_SITE_KEY.slice(-4)}`
-    : null;
-
   (window as any).__PUNTO_LIMPIO_APP_CHECK__ = {
     provider: APP_CHECK_PROVIDER_LABEL,
     siteKeyPresent: Boolean(APP_CHECK_SITE_KEY),
-    siteKeyPreview: previewKey,
+    siteKeyPreview: APP_CHECK_SITE_KEY_PREVIEW,
     disableFlag: APP_CHECK_FORCE_DISABLE,
     debugTokenPresent: Boolean(APP_CHECK_DEBUG_TOKEN),
     isProductionBundle: IS_PRODUCTION_BUNDLE,
@@ -80,6 +80,35 @@ const publishAppCheckSnapshot = () => {
     lastErrorMessage: appCheckLastError?.message ?? null,
     lastUpdatedAt: new Date().toISOString(),
   };
+};
+
+let appCheckSnapshotLogged = false;
+
+const logAppCheckSnapshotOnce = (phase: "bootstrap" | "update") => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (phase === "bootstrap" && appCheckSnapshotLogged) {
+    return;
+  }
+
+  const payload = {
+    provider: APP_CHECK_PROVIDER_LABEL,
+    siteKeyPresent: Boolean(APP_CHECK_SITE_KEY),
+    siteKeyPreview: APP_CHECK_SITE_KEY_PREVIEW,
+    disableFlag: APP_CHECK_FORCE_DISABLE,
+    debugTokenPresent: Boolean(APP_CHECK_DEBUG_TOKEN),
+    bundleMode: import.meta.env.MODE,
+    productionBundle: IS_PRODUCTION_BUNDLE,
+  };
+
+  if (phase === "bootstrap") {
+    console.info("[AppCheck] Configuración detectada", payload);
+    appCheckSnapshotLogged = true;
+  } else {
+    console.info("[AppCheck] Configuración actualizada", payload);
+  }
 };
 
 if (
@@ -95,6 +124,7 @@ if (
 export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY) && !APP_CHECK_FORCE_DISABLE;
 
 publishAppCheckSnapshot();
+logAppCheckSnapshotOnce("bootstrap");
 
 const buildSiteKeyFix = () =>
   [
@@ -167,6 +197,7 @@ const logAppCheckMisconfiguration = (error?: unknown) => {
   appCheckTokenStatus = APP_CHECK_SITE_KEY ? "error" : "missing";
   appCheckLastError = error ? normalizeError(error) : null;
   publishAppCheckSnapshot();
+  logAppCheckSnapshotOnce("update");
   if (appCheckWarningLogged) {
     return;
   }
@@ -214,6 +245,7 @@ try {
                             appCheckTokenStatus = "success";
                             appCheckLastError = null;
                             publishAppCheckSnapshot();
+                            logAppCheckSnapshotOnce("update");
                             hydrateFunctions();
                         })
                         .catch((error) => {
