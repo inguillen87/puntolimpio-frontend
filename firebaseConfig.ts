@@ -40,11 +40,12 @@ let functions = null;
 let appCheckInstance: AppCheck | null = null;
 let appCheckWarningLogged = false;
 
-const APP_CHECK_SITE_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
-const APP_CHECK_DEBUG_TOKEN = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN;
+const APP_CHECK_SITE_KEY = (import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? "").trim();
+const APP_CHECK_DEBUG_TOKEN = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN ?? "").trim();
+const IS_PRODUCTION_BUNDLE = Boolean(import.meta.env.PROD || import.meta.env.MODE === "production");
 const APP_CHECK_FORCE_DISABLE =
   String(import.meta.env.VITE_FIREBASE_DISABLE_APPCHECK || "").toLowerCase() === "true" &&
-  (import.meta.env.DEV || import.meta.env.MODE === "development");
+  !IS_PRODUCTION_BUNDLE;
 const APP_CHECK_PROVIDER = String(
   import.meta.env.VITE_FIREBASE_APPCHECK_PROVIDER || "v3",
 ).toLowerCase();
@@ -67,6 +68,14 @@ if (
 }
 
 export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY) && !APP_CHECK_FORCE_DISABLE;
+
+const buildSiteKeyFix = () =>
+  [
+    "Definí VITE_FIREBASE_APPCHECK_SITE_KEY en Vercel con la site key v3 (formato 6Lxxxxxxxxxxxxxxxx).",
+    "Volvé a desplegar marcando 'Clear build cache' para que Vite reempaquete la clave.",
+    "Abrí la app en una ventana de incógnito, desregistrá el Service Worker y hacé un hard reload (Ctrl+F5) para limpiar tokens viejos.",
+    "En la consola del navegador ejecutá console.log(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY) para confirmar que el bundle ve la clave.",
+  ].join(" ");
 
 const normalizeError = (error: unknown): { code?: string; message?: string } => {
   if (error && typeof error === "object") {
@@ -94,7 +103,14 @@ const buildAppCheckHint = (error?: unknown): string => {
   ];
 
   if (!APP_CHECK_SITE_KEY) {
-    parts.push("La variable VITE_FIREBASE_APPCHECK_SITE_KEY no está definida en el entorno del front.");
+    parts.push(buildSiteKeyFix());
+  } else if (
+    RESOLVED_APPCHECK_PROVIDER === "v3" &&
+    !APP_CHECK_SITE_KEY.startsWith("6L")
+  ) {
+    parts.push(
+      "La clave configurada no parece ser reCAPTCHA v3 (debe comenzar con '6L'). Reemplazala por la site key v3 obtenida en https://www.google.com/recaptcha/admin/create."
+    );
   }
 
   const { code, message } = normalizeError(error);
@@ -185,9 +201,12 @@ try {
                     new Error(
                         RESOLVED_APPCHECK_PROVIDER === "enterprise"
                             ? "VITE_FIREBASE_APPCHECK_SITE_KEY es obligatorio para usar ReCaptchaEnterpriseProvider."
-                            : "VITE_FIREBASE_APPCHECK_SITE_KEY es obligatorio para usar ReCaptchaV3Provider.",
+                            : "VITE_FIREBASE_APPCHECK_SITE_KEY es obligatorio para usar ReCaptchaV3Provider."
                     ),
                 );
+                if (IS_PRODUCTION_BUNDLE) {
+                    console.error(buildSiteKeyFix());
+                }
             }
         }
 

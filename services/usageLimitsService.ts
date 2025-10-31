@@ -12,7 +12,7 @@ export type UsageServiceCategory = 'document' | 'assistant';
 
 const createAppCheckError = (): Error & { code?: string } => {
   const error = new Error(
-    `Firebase App Check no está operativo (proveedor configurado: ${appCheckProviderLabel}). Asegurate de definir VITE_FIREBASE_APPCHECK_SITE_KEY, autorizar este dominio en la consola de ${appCheckProviderLabel} y verificar que el proveedor elegido en Firebase App Check coincida con el del front.`
+    `Firebase App Check no está operativo (proveedor configurado: ${appCheckProviderLabel}). Asegurate de definir VITE_FIREBASE_APPCHECK_SITE_KEY con la site key v3 que inicia con "6L", autorizar este dominio en la consola de ${appCheckProviderLabel}, desplegar limpiando la build cache y verificar que el proveedor elegido en Firebase App Check coincida con el del front.`
   ) as Error & { code?: string };
   error.code = 'appcheck/not-configured';
   return error;

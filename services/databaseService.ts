@@ -94,7 +94,7 @@ export const uploadFile = async (file: File, path: string, organizationId: strin
     } catch (error: any) {
         if (error?.code === 'appcheck/not-configured') {
             error.message =
-                `Firebase App Check no está operativo en el front (proveedor configurado: ${appCheckProviderLabel}). Definí VITE_FIREBASE_APPCHECK_SITE_KEY, verificá que el dominio esté autorizado en la consola de ${appCheckProviderLabel} y que el proveedor de App Check coincida con el configurado en Firebase.`;
+                `Firebase App Check no está operativo en el front (proveedor configurado: ${appCheckProviderLabel}). Definí VITE_FIREBASE_APPCHECK_SITE_KEY con la clave reCAPTCHA v3 que comienza con "6L", verificá que el dominio esté autorizado en la consola de ${appCheckProviderLabel} y que el proveedor de App Check coincida con el configurado en Firebase. Redeployá con "Clear build cache" y refrescá la PWA para que el bundle tome la clave.`;
         }
         console.error("[DB Service] ERROR CRÍTICO AL SUBIR:", {
             message: error.message,

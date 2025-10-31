@@ -29,8 +29,8 @@ Firebase App Check debe estar activo tanto en producción como en los despliegue
 
 1. **reCAPTCHA v3 (recomendado):**
    - En Firebase → App Check → tu app web, seleccioná **reCAPTCHA** como proveedor.
-   - En [Google reCAPTCHA v3](https://www.google.com/recaptcha/admin/create) generá una site key v3 e incluí los dominios `puntolimpio.ar`, `www.puntolimpio.ar` y `*.vercel.app`.
-   - Configurá la variable `VITE_FIREBASE_APPCHECK_SITE_KEY` en Vercel con esa clave y redeployá.
+   - En [Google reCAPTCHA v3](https://www.google.com/recaptcha/admin/create) generá una site key v3 (empieza con `6L`) e incluí los dominios `puntolimpio.ar`, `www.puntolimpio.ar` y `*.vercel.app`.
+   - Configurá la variable `VITE_FIREBASE_APPCHECK_SITE_KEY` en Vercel con esa clave y redeployá usando la opción **Clear build cache** para que el bundle tome el valor.
    - (Opcional) `VITE_FIREBASE_APPCHECK_PROVIDER` puede quedar vacío o en `v3` (valor por defecto).
 
 2. **reCAPTCHA Enterprise:**
@@ -38,6 +38,8 @@ Firebase App Check debe estar activo tanto en producción como en los despliegue
    - En Google Cloud → reCAPTCHA Enterprise creá una site key *Web (score-based)* con los mismos dominios y habilitá la API de reCAPTCHA Enterprise en el proyecto.
    - Configurá `VITE_FIREBASE_APPCHECK_SITE_KEY` y `VITE_FIREBASE_APPCHECK_PROVIDER=enterprise` en Vercel antes de redeployar.
 
-La aplicación inicializa App Check antes de tocar Firestore, Storage o Functions. Solo en desarrollo local (`npm run dev`) podés establecer `VITE_FIREBASE_DISABLE_APPCHECK=true` para depurar en dominios no autorizados; la bandera se ignora automáticamente en producción.
+La aplicación inicializa App Check antes de tocar Firestore, Storage o Functions. Solo en desarrollo local (`npm run dev`) podés establecer `VITE_FIREBASE_DISABLE_APPCHECK=true` para depurar en dominios no autorizados; la bandera se ignora automáticamente en entornos compilados.
 
-> 💡 Después de cambiar el proveedor o la site key en Firebase/App Check, recordá redeployar la app con las nuevas variables de entorno y abrirla en una ventana de incógnito. Así evitás tokens viejos que provocan el error `appCheck/initial-throttle` mientras Firebase propaga la configuración.
+> ✅ Validación rápida tras desplegar: abrí DevTools, pestaña *Application*, desregistrá el Service Worker, limpiá el storage y hacé un hard reload. Luego ejecutá `console.log(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY)` en la consola; debe mostrar tu clave que inicia con `6L`. Si aparece `undefined`, faltó la variable o limpiar la caché de construcción.
+
+> 💡 Después de cambiar el proveedor o la site key en Firebase/App Check, recordá redeployar la app con las nuevas variables de entorno, marcar **Clear build cache** y abrirla en una ventana de incógnito. Así evitás tokens viejos que provocan el error `appCheck/initial-throttle` mientras Firebase propaga la configuración.
