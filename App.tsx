@@ -108,7 +108,7 @@ const AppContent: React.FC = () => {
   const [viewingAsOrgId, setViewingAsOrgId] = useState<string | null>(null);
   const [itemsForQrModal, setItemsForQrModal] = useState<Item[] | null>(null);
   const [demoUsage, setDemoUsage] = useState<DemoUsageSnapshot | null>(null);
-  const { setActiveOrganization, updatePlan } = useUsageLimits();
+  const { setActiveOrganization, refreshUsage, registerMediaConsumption } = useUsageLimits();
 
   const demoAccountConfig = useMemo(() => getDemoAccountConfig(currentUser?.email), [currentUser?.email]);
   const demoLimit = demoAccountConfig?.limit ?? DEMO_UPLOAD_LIMIT;
@@ -236,15 +236,12 @@ const AppContent: React.FC = () => {
   }, [buildDemoUsageScope, demoAccountConfig, loadDemoUsageSnapshot]);
 
   useEffect(() => {
-    if (organization?.id) {
-      setActiveOrganization(organization.id, organization.usagePlan);
-      if (organization.usagePlan) {
-        updatePlan(organization.usagePlan);
-      }
+    if (organization?.id && currentUser?.id) {
+      setActiveOrganization(organization.id, currentUser.id);
     } else {
       setActiveOrganization(null);
     }
-  }, [organization, setActiveOrganization, updatePlan]);
+  }, [organization?.id, currentUser?.id, setActiveOrganization]);
 
   const showNotification = (message: React.ReactNode, isError: boolean = false) => {
     setNotification(message);
@@ -500,6 +497,8 @@ const AppContent: React.FC = () => {
         try {
             const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
             documentUrl = await databaseService.uploadFile(documentFile, fileName);
+            registerMediaConsumption();
+            await refreshUsage();
         } catch (error: any) {
              showNotification(`Falló la subida del archivo: ${error.code || error.message}`, true);
              throw error;

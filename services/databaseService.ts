@@ -1,7 +1,8 @@
 import { collection, getDocs, writeBatch, doc, deleteDoc, updateDoc, addDoc, query, where, getDoc, setDoc, limit } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, getDownloadURL } from 'firebase/storage';
 import { db } from '../firebaseConfig'; // Importa la configuración de Firebase
 import { Item, Transaction, ControlRecord, Location, Organization, User, UserRole, Invitation, UserOrInvitation, DailyUsage, Partner, PartnerType } from '../types';
+import { requestSignedUploadUrl } from './usageLimitsService';
 
 const ITEMS_COLLECTION = 'items';
 const TRANSACTIONS_COLLECTION = 'transactions';
@@ -49,8 +50,20 @@ const storage = getStorage();
 export const uploadFile = async (file: File, path: string): Promise<string> => {
     console.log(`[DB Service] Intentando subir archivo a: ${path}`);
     try {
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
+        const contentType = file.type || 'application/octet-stream';
+        const { uploadUrl, path: remotePath } = await requestSignedUploadUrl(contentType);
+        const response = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': contentType },
+            body: file,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`UPLOAD_FAILED_${response.status}${errorText ? `: ${errorText}` : ''}`);
+        }
+
+        const storageRef = ref(storage, remotePath);
         const downloadURL = await getDownloadURL(storageRef);
         console.log(`[DB Service] Archivo subido con éxito. URL: ${downloadURL}`);
         return downloadURL;

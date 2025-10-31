@@ -4,6 +4,7 @@ import { initializeApp } from "firebase/app";
 import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 
 // User-provided Firebase config
 export const firebaseConfig = {
@@ -27,6 +28,7 @@ let app = null;
 let db = null;
 let storage = null;
 let auth = null;
+let functions = null;
 
 // Initialize Firebase only if the configuration has been changed from the default.
 try {
@@ -36,6 +38,7 @@ try {
         db = initializeFirestore(app, { ignoreUndefinedProperties: true });
         storage = getStorage(app);
         auth = getAuth(app);
+        functions = getFunctions(app, "southamerica-east1");
     }
 } catch (e) {
     console.error("Error al inicializar Firebase. Por favor, verifica tu configuración.", e);
@@ -53,4 +56,4 @@ if (!isFirebaseConfigured) {
 }
 
 // Exporta las instancias (pueden ser null si no está configurado)
-export { db, storage, auth };
+export { db, storage, auth, functions };
