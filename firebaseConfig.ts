@@ -16,7 +16,7 @@ import { getFunctions } from "firebase/functions";
 // User-provided Firebase config
 export const firebaseConfig = {
   apiKey: "AIzaSyDhvEuoA2qdnrF7TsmCLC3ewCv_tyaHLYU",
-  authDomain: "punto-limpio-5a939.firebaseapp.com",
+  authDomain: "punto-limpio-5a939.firebasestorage.app",
   projectId: "punto-limpio-5a939",
   storageBucket: "punto-limpio-5a939.appspot.com",
   messagingSenderId: "1085395296235",
