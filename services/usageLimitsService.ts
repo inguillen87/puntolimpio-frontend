@@ -1,283 +1,162 @@
-import { UsageCounters, UsageLimitsState, UsagePlanSeed } from '../types';
+import { doc, getDoc } from 'firebase/firestore';
+import { httpsCallable, HttpsCallable } from 'firebase/functions';
+import { db, functions as cloudFunctions, isAppCheckConfigured } from '../firebaseConfig';
+import { UsageLimitsState } from '../types';
 
 export type UsageServiceCategory = 'document' | 'assistant';
 
-const STORAGE_KEY = 'punto-limpio-usage-limits-v1';
-const DEFAULT_MONTHLY_QUOTA = 1000;
-
-interface StoredUsageRecord {
-  organizationId: string;
-  planName: string;
-  monthlyQuota: number;
-  dailyQuota?: number;
-  perMinuteQuota?: number;
-  used: number;
-  resetsOn: string;
-  degradeMode: boolean;
-  degradeReason?: string;
-  lastUpdated: string;
-  counters: UsageCounters;
-  upgradeRequestedAt?: string;
-}
-
-type UsageStorage = Record<string, StoredUsageRecord>;
-
-const getNow = () => new Date();
-
-const readStorage = (): UsageStorage => {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as UsageStorage;
-  } catch (error) {
-    console.error('Failed to read usage limits storage', error);
-    return {};
-  }
+const createAppCheckError = (): Error & { code?: string } => {
+  const error = new Error(
+    'Firebase App Check no está configurado. Agregá la variable VITE_FIREBASE_APPCHECK_SITE_KEY para habilitar las funciones protegidas.'
+  ) as Error & { code?: string };
+  error.code = 'appcheck/not-configured';
+  return error;
 };
 
-const writeStorage = (storage: UsageStorage) => {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(storage));
-  } catch (error) {
-    console.error('Failed to persist usage limits storage', error);
+const ensureFunctions = () => {
+  if (!cloudFunctions) {
+    if (!isAppCheckConfigured) {
+      throw createAppCheckError();
+    }
+    throw new Error('FUNCTIONS_NOT_CONFIGURED');
   }
+  if (!isAppCheckConfigured) {
+    throw createAppCheckError();
+  }
+  return cloudFunctions;
 };
 
-const createDefaultCounters = (): UsageCounters => ({
-  documentScans: 0,
-  assistantSessions: 0,
-});
-
-const computeNextReset = (reference: Date): string => {
-  const next = new Date(reference);
-  next.setUTCDate(reference.getUTCDate());
-  next.setUTCHours(0, 0, 0, 0);
-  // Move to first day of next month for hard monthly reset
-  next.setUTCMonth(reference.getUTCMonth() + 1, 1);
-  return next.toISOString();
+export const periodNowYYYYMM = (): string => {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}${month}`;
 };
 
-const ensureCycleFreshness = (record: StoredUsageRecord): StoredUsageRecord => {
-  const now = getNow();
-  const resetDate = new Date(record.resetsOn);
-  if (Number.isNaN(resetDate.getTime())) {
-    record.resetsOn = computeNextReset(now);
-    record.used = 0;
-    record.counters = createDefaultCounters();
-    record.degradeMode = false;
-    record.degradeReason = undefined;
-    record.lastUpdated = now.toISOString();
-    return record;
+const normalizeResetAt = (value: unknown): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value !== null && 'toDate' in value) {
+    try {
+      const date = (value as { toDate: () => Date }).toDate();
+      if (date instanceof Date && !Number.isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    } catch (error) {
+      console.warn('No se pudo normalizar resetAt desde Firestore.', error);
+    }
   }
-
-  if (now >= resetDate) {
-    record.resetsOn = computeNextReset(now);
-    record.used = 0;
-    record.counters = createDefaultCounters();
-    record.degradeMode = false;
-    record.degradeReason = undefined;
-  }
-  record.lastUpdated = now.toISOString();
-  return record;
+  return null;
 };
 
-const buildRecordFromSeed = (organizationId: string, seed?: UsagePlanSeed): StoredUsageRecord => {
-  const now = getNow();
-  const counters = createDefaultCounters();
-  const monthlyQuota = seed?.monthlyQuota ?? DEFAULT_MONTHLY_QUOTA;
+const buildQuotaDocId = (organizationId: string, uid: string, period: string = periodNowYYYYMM()): string =>
+  `${organizationId}__${uid}__${period}`;
+
+export const loadUsageState = async (organizationId: string, uid: string): Promise<UsageLimitsState | null> => {
+  if (!db) return null;
+  const period = periodNowYYYYMM();
+  const ref = doc(db, 'quota', buildQuotaDocId(organizationId, uid, period));
+  const snapshot = await getDoc(ref);
+  const nowIso = new Date().toISOString();
+
+  if (!snapshot.exists()) {
+    return {
+      organizationId,
+      userId: uid,
+      period,
+      chatRemaining: null,
+      mediaRemaining: null,
+      resetAt: null,
+      lastSyncedAt: nowIso,
+    };
+  }
+
+  const data = snapshot.data() as Record<string, unknown>;
+  const chatRemaining = typeof data.chatRemaining === 'number' ? data.chatRemaining : null;
+  const mediaRemaining = typeof data.mediaRemaining === 'number' ? data.mediaRemaining : null;
+  const periodValue = typeof data.period === 'string' ? data.period : period;
+  const resetAt = normalizeResetAt(data.resetAt);
+
   return {
     organizationId,
-    planName: seed?.planName ?? 'Plan Demo Corporativo',
-    monthlyQuota,
-    dailyQuota: seed?.dailyQuota,
-    perMinuteQuota: seed?.perMinuteQuota,
-    used: 0,
-    resetsOn: seed?.resetsOn ?? computeNextReset(now),
-    degradeMode: false,
-    lastUpdated: now.toISOString(),
-    counters,
+    userId: uid,
+    period: periodValue,
+    chatRemaining,
+    mediaRemaining,
+    resetAt,
+    lastSyncedAt: nowIso,
   };
 };
 
-const toState = (record: StoredUsageRecord): UsageLimitsState => ({
-  organizationId: record.organizationId,
-  planName: record.planName,
-  monthlyQuota: record.monthlyQuota,
-  dailyQuota: record.dailyQuota,
-  perMinuteQuota: record.perMinuteQuota,
-  used: record.used,
-  remaining: Math.max(record.monthlyQuota - record.used, 0),
-  resetsOn: record.resetsOn,
-  degradeMode: record.degradeMode,
-  degradeReason: record.degradeReason,
-  lastUpdated: record.lastUpdated,
-  counters: record.counters,
-  upgradeRequestedAt: record.upgradeRequestedAt,
-});
-
-export const loadUsageState = (organizationId: string, seed?: UsagePlanSeed): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId, seed);
-    storage[organizationId] = record;
-    writeStorage(storage);
+export const canUseRemoteAnalysis = (
+  state: UsageLimitsState | null,
+  category: UsageServiceCategory = 'document'
+): boolean => {
+  if (!state) return true;
+  if (category === 'assistant') {
+    return state.chatRemaining === null || state.chatRemaining > 0;
   }
-
-  if (seed) {
-    let requiresPersist = false;
-    if (seed.planName && seed.planName !== record.planName) {
-      record.planName = seed.planName;
-      requiresPersist = true;
-    }
-    if (seed.monthlyQuota && seed.monthlyQuota !== record.monthlyQuota) {
-      record.monthlyQuota = seed.monthlyQuota;
-      requiresPersist = true;
-    }
-    if (seed.dailyQuota !== undefined && seed.dailyQuota !== record.dailyQuota) {
-      record.dailyQuota = seed.dailyQuota;
-      requiresPersist = true;
-    }
-    if (seed.perMinuteQuota !== undefined && seed.perMinuteQuota !== record.perMinuteQuota) {
-      record.perMinuteQuota = seed.perMinuteQuota;
-      requiresPersist = true;
-    }
-    if (seed.resetsOn && seed.resetsOn !== record.resetsOn) {
-      record.resetsOn = seed.resetsOn;
-      requiresPersist = true;
-    }
-    if (requiresPersist) {
-      storage[organizationId] = record;
-      writeStorage(storage);
-    }
-  }
-
-  const refreshed = ensureCycleFreshness(record);
-  storage[organizationId] = refreshed;
-  writeStorage(storage);
-  return toState(refreshed);
+  return state.mediaRemaining === null || state.mediaRemaining > 0;
 };
 
-const persistRecord = (record: StoredUsageRecord) => {
-  const storage = readStorage();
-  storage[record.organizationId] = record;
-  writeStorage(storage);
+let consumeChatCallable: HttpsCallable<{ orgId: string }, { remaining: number }> | null = null;
+let signedUploadCallable: HttpsCallable<{ contentType: string; orgId: string }, SignedUploadDetails> | null = null;
+
+const ensureConsumeChatCallable = () => {
+  if (!consumeChatCallable) {
+    consumeChatCallable = httpsCallable<{ orgId: string }, { remaining: number }>(
+      ensureFunctions(),
+      'consumeChatCredit'
+    );
+  }
+  return consumeChatCallable;
 };
 
-const updateCounters = (record: StoredUsageRecord, category: UsageServiceCategory, amount: number) => {
-  if (category === 'document') {
-    record.counters.documentScans += amount;
-  } else if (category === 'assistant') {
-    record.counters.assistantSessions += amount;
+const ensureSignedUploadCallable = () => {
+  if (!signedUploadCallable) {
+    signedUploadCallable = httpsCallable<{ contentType: string; orgId: string }, SignedUploadDetails>(
+      ensureFunctions(),
+      'getSignedUploadUrl'
+    );
   }
+  return signedUploadCallable;
 };
 
-export const recordUsage = (
-  organizationId: string,
-  category: UsageServiceCategory,
-  amount: number = 1
-): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId);
+export const consumeChatCredit = async (organizationId: string): Promise<number> => {
+  if (!organizationId) {
+    throw new Error('MISSING_ORG');
   }
-
-  record = ensureCycleFreshness(record);
-  updateCounters(record, category, amount);
-  record.used += amount;
-
-  if (record.used >= record.monthlyQuota) {
-    record.degradeMode = true;
-    record.degradeReason = 'Límite mensual alcanzado. Se habilita modo degradado (solo QR/OCR local).';
+  const callable = ensureConsumeChatCallable();
+  const result = await callable({ orgId: organizationId });
+  const remaining = (result.data as { remaining?: unknown })?.remaining;
+  if (typeof remaining !== 'number') {
+    throw new Error('INVALID_RESPONSE');
   }
-
-  record.lastUpdated = getNow().toISOString();
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
+  return remaining;
 };
 
-export const markDegraded = (
-  organizationId: string,
-  reason: string = 'Servicio remoto deshabilitado temporalmente.'
-): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId);
-  }
-  record = ensureCycleFreshness(record);
-  record.degradeMode = true;
-  record.degradeReason = reason;
-  record.lastUpdated = getNow().toISOString();
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
-};
+export interface SignedUploadDetails {
+  uploadUrl: string;
+  path: string;
+  contentType: string;
+}
 
-export const clearDegraded = (organizationId: string): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId);
+export const requestSignedUploadUrl = async (
+  contentType: string,
+  organizationId: string
+): Promise<SignedUploadDetails> => {
+  if (!organizationId) {
+    throw new Error('MISSING_ORG');
   }
-  record = ensureCycleFreshness(record);
-  record.degradeMode = false;
-  record.degradeReason = undefined;
-  record.lastUpdated = getNow().toISOString();
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
-};
-
-export const requestUpgrade = (organizationId: string): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId);
+  const callable = ensureSignedUploadCallable();
+  const result = await callable({ contentType, orgId: organizationId });
+  const data = result.data as Partial<SignedUploadDetails> | null | undefined;
+  if (!data || typeof data.uploadUrl !== 'string' || typeof data.path !== 'string') {
+    throw new Error('INVALID_RESPONSE');
   }
-  record = ensureCycleFreshness(record);
-  record.upgradeRequestedAt = getNow().toISOString();
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
-};
-
-export const clearUpgradeRequest = (organizationId: string): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId);
-  }
-  record = ensureCycleFreshness(record);
-  record.upgradeRequestedAt = undefined;
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
-};
-
-export const setPlan = (organizationId: string, seed: UsagePlanSeed): UsageLimitsState => {
-  const storage = readStorage();
-  let record = storage[organizationId];
-  if (!record) {
-    record = buildRecordFromSeed(organizationId, seed);
-  } else {
-    record.planName = seed.planName ?? record.planName;
-    record.monthlyQuota = seed.monthlyQuota ?? record.monthlyQuota;
-    record.dailyQuota = seed.dailyQuota ?? record.dailyQuota;
-    record.perMinuteQuota = seed.perMinuteQuota ?? record.perMinuteQuota;
-    record.resetsOn = seed.resetsOn ?? record.resetsOn;
-  }
-  storage[organizationId] = record;
-  writeStorage(storage);
-  return toState(record);
-};
-
-export const canUseRemoteAnalysis = (state: UsageLimitsState | null): boolean => {
-  if (!state) return false;
-  if (state.degradeMode) return false;
-  return state.used < state.monthlyQuota;
+  return {
+    uploadUrl: data.uploadUrl,
+    path: data.path,
+    contentType: data.contentType ?? contentType,
+  };
 };
