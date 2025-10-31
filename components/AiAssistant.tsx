@@ -763,7 +763,7 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(() => new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
+  const { canUseRemoteAnalysis, consumeChatCredit, usageState } = useUsageLimits();
   const aiAvailable = isRemoteProviderConfigured();
   const providerLabel = getProviderLabel();
   const effectiveDemoLimit = demoLimit ?? DEMO_UPLOAD_LIMIT;
@@ -1030,14 +1030,13 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
     }
 
     if (!canUseRemoteAnalysis('assistant')) {
-      const resetMessage = usageState?.resetsOn
-        ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
+      const resetMessage = usageState?.resetAt
+        ? new Date(usageState.resetAt).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
         : 'el próximo ciclo';
-      const reason = usageState?.degradeReason ?? 'El servicio remoto está deshabilitado temporalmente.';
       const degradeMessage: Message = {
         id: createMessageId(),
         sender: 'ai',
-        content: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
+        content: `No quedan créditos activos para el asistente remoto. Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
       };
       updateConversation([...newMessages, degradeMessage]);
       return;
@@ -1100,8 +1099,6 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
         }
       }
 
-      recordRemoteUsage('assistant');
-
       const parsedPayload = interpretAssistantResponse(baseResponse);
       const decoratedPayload = guardDemoUsage
         ? decorateAssistantResponse(parsedPayload, latestDemoSnapshot, limitValue, getDemoResetLabel)
@@ -1118,6 +1115,34 @@ const AiAssistant: React.FC<AiAssistantProps> = ({
       } finally {
         setIsLoading(false);
       }
+      return;
+    }
+
+    try {
+      await consumeChatCredit();
+    } catch (error: any) {
+      console.error('No se pudo consumir crédito para el asistente remoto.', error);
+      const errorCode = typeof error?.code === 'string' ? error.code : '';
+      const errorMessage = typeof error?.message === 'string' ? error.message : '';
+      let reason = 'No se pudo validar el crédito del asistente remoto.';
+      if (errorCode === 'appcheck/not-configured') {
+        reason = 'App Check no está configurado. Definí VITE_FIREBASE_APPCHECK_SITE_KEY para habilitar el asistente remoto.';
+      } else if (errorMessage.includes('NO_CREDIT') || errorCode === 'functions/permission-denied') {
+        reason = 'No quedan créditos activos para el asistente remoto.';
+      } else if (errorMessage.includes('UNAUTHENTICATED') || errorCode === 'functions/unauthenticated') {
+        reason = 'La sesión actual no está autenticada para el asistente remoto.';
+      } else if (errorCode) {
+        reason = `No se pudo validar el crédito remoto (${errorCode}).`;
+      }
+      const resetMessage = usageState?.resetAt
+        ? new Date(usageState.resetAt).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
+        : 'el próximo ciclo';
+      const degradeMessage: Message = {
+        id: createMessageId(),
+        sender: 'ai',
+        content: `${reason} Podés continuar con el QR y la carga manual hasta el reinicio (${resetMessage}).`,
+      };
+      updateConversation([...newMessages, degradeMessage]);
       return;
     }
 

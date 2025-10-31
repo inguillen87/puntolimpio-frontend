@@ -10,7 +10,7 @@ const INVITATIONS_KEY = 'punto-limpio-invitations';
 const PARTNERS_KEY = 'punto-limpio-partners';
 
 
-export const uploadFile = async (file: File, path: string): Promise<string> => {
+export const uploadFile = async (file: File, path: string, _organizationId?: string): Promise<string> => {
     console.log(`Mock Upload: ${path} (returning data URL)`);
     return new Promise((resolve) => {
         const reader = new FileReader();

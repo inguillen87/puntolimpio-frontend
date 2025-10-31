@@ -25,7 +25,7 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isCameraInitializing, setIsCameraInitializing] = useState(false);
-  const { canUseRemoteAnalysis, recordRemoteUsage, usageState } = useUsageLimits();
+  const { canUseRemoteAnalysis, usageState } = useUsageLimits();
   const providerLabel = useMemo(() => getProviderLabel(), []);
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -69,9 +69,10 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
     if (!providerConfigured) {
       setAnalysisNotice(`Proveedor ${providerLabel} no configurado. Operando con QR y OCR local sin costos externos.`);
     } else if (!allowRemote) {
-      const resetMessage = usageState?.resetsOn ? new Date(usageState.resetsOn).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'el próximo ciclo';
-      const reason = usageState?.degradeReason ?? 'La cuota remota está agotada.';
-      setAnalysisNotice(`${reason} Se ejecutará únicamente QR/OCR local hasta ${resetMessage}.`);
+      const resetMessage = usageState?.resetAt
+        ? new Date(usageState.resetAt).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric' })
+        : 'el próximo ciclo';
+      setAnalysisNotice(`No quedan créditos de análisis remoto disponibles. Se ejecutará únicamente QR/OCR local hasta ${resetMessage}.`);
     } else {
       setAnalysisNotice(null);
     }
@@ -87,9 +88,6 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
       }
       setAnalysisSource(outcome.source);
       setAnalysisFromCache(outcome.fromCache);
-      if (outcome.usedRemote && !outcome.fromCache) {
-        recordRemoteUsage('document');
-      }
     } catch (err: any) {
       console.error('Error durante el escaneo:', err);
       setError(err.message || 'Ocurrió un error al procesar el documento.');
@@ -98,7 +96,7 @@ const ScanDocument: React.FC<ScanDocumentProps> = ({ onConfirmUpload, locations 
     } finally {
       setIsLoading(false);
     }
-  }, [documentType, canUseRemoteAnalysis, usageState, recordRemoteUsage]);
+  }, [documentType, canUseRemoteAnalysis, usageState, providerLabel]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
