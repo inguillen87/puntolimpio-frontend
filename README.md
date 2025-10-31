@@ -23,18 +23,19 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ioutoX5Po34K12pehTbK_k
 3. Run the app:
    `npm run dev`
 
-### Firebase App Check en entornos locales
+### Firebase App Check
 
-La aplicación usa Firebase App Check para proteger las funciones Cloud y el acceso a Firestore. Si ejecutás el proyecto en un
-dominio que no está autorizado en la consola de reCAPTCHA v3 (por ejemplo `localhost`), los intentos de obtener el token genera
-rán errores 400 y verás mensajes como "FirebaseError: Missing or insufficient permissions" cuando intentes confirmar una carga.
+Firebase App Check debe estar activo tanto en producción como en los despliegues de preview. Elegí un único proveedor y asegurate de que coincida con el configurado en la consola de Firebase:
 
-Para evitar el ruido durante el desarrollo, podés desactivar App Check en el front-end agregando la siguiente variable a tu `.
-env.local`:
+1. **reCAPTCHA v3 (recomendado):**
+   - En Firebase → App Check → tu app web, seleccioná **reCAPTCHA** como proveedor.
+   - En [Google reCAPTCHA v3](https://www.google.com/recaptcha/admin/create) generá una site key v3 e incluí los dominios `puntolimpio.ar`, `www.puntolimpio.ar` y `*.vercel.app`.
+   - Configurá la variable `VITE_FIREBASE_APPCHECK_SITE_KEY` en Vercel con esa clave y redeployá.
+   - (Opcional) `VITE_FIREBASE_APPCHECK_PROVIDER` puede quedar vacío o en `v3` (valor por defecto).
 
-```bash
-VITE_FIREBASE_DISABLE_APPCHECK=true
-```
+2. **reCAPTCHA Enterprise:**
+   - En Firebase → App Check → tu app web, dejá **reCAPTCHA Enterprise** como proveedor.
+   - En Google Cloud → reCAPTCHA Enterprise creá una site key *Web (score-based)* con los mismos dominios y habilitá la API de reCAPTCHA Enterprise en el proyecto.
+   - Configurá `VITE_FIREBASE_APPCHECK_SITE_KEY` y `VITE_FIREBASE_APPCHECK_PROVIDER=enterprise` en Vercel antes de redeployar.
 
-Dejá este valor en `false` (o eliminá la variable) en los entornos donde tengas configurado el sitio en reCAPTCHA v3 para volver
-a habilitar la protección.
+La aplicación inicializa App Check antes de tocar Firestore, Storage o Functions. Solo en desarrollo local (`npm run dev`) podés establecer `VITE_FIREBASE_DISABLE_APPCHECK=true` para depurar en dominios no autorizados; la bandera se ignora automáticamente en producción.
