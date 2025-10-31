@@ -30,19 +30,6 @@ export const firebaseConfig = {
 export const isFirebaseConfigured = 
     firebaseConfig.apiKey &&
     !firebaseConfig.apiKey.startsWith("TU_");
-
-
-let app = null;
-let db = null;
-let storage = null;
-let auth = null;
-let functions = null;
-let appCheckInstance: AppCheck | null = null;
-let appCheckWarningLogged = false;
-let appCheckTokenStatus: "missing" | "pending" | "success" | "error" =
-  APP_CHECK_SITE_KEY ? "pending" : "missing";
-let appCheckLastError: { code?: string; message?: string } | null = null;
-
 const APP_CHECK_SITE_KEY = (import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY ?? "").trim();
 const APP_CHECK_DEBUG_TOKEN = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN ?? "").trim();
 const IS_PRODUCTION_BUNDLE = Boolean(import.meta.env.PROD || import.meta.env.MODE === "production");
@@ -59,6 +46,18 @@ const APP_CHECK_PROVIDER_LABEL =
     ? "reCAPTCHA Enterprise"
     : "reCAPTCHA v3";
 export const appCheckProviderLabel = APP_CHECK_PROVIDER_LABEL;
+
+let appCheckInstance: AppCheck | null = null;
+let appCheckWarningLogged = false;
+let appCheckTokenStatus: "missing" | "pending" | "success" | "error" =
+  APP_CHECK_SITE_KEY ? "pending" : "missing";
+let appCheckLastError: { code?: string; message?: string } | null = null;
+
+let app = null;
+let db = null;
+let storage = null;
+let auth = null;
+let functions = null;
 
 const publishAppCheckSnapshot = () => {
   if (typeof window === "undefined") {
