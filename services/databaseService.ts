@@ -1,6 +1,6 @@
 import { collection, getDocs, writeBatch, doc, deleteDoc, updateDoc, addDoc, query, where, getDoc, setDoc, limit } from 'firebase/firestore';
 import { getStorage, ref, getDownloadURL } from 'firebase/storage';
-import { db } from '../firebaseConfig'; // Importa la configuración de Firebase
+import { appCheckProviderLabel, db } from '../firebaseConfig'; // Importa la configuración de Firebase
 import { Item, Transaction, ControlRecord, Location, Organization, User, UserRole, Invitation, UserOrInvitation, DailyUsage, Partner, PartnerType } from '../types';
 import { requestSignedUploadUrl } from './usageLimitsService';
 
@@ -94,7 +94,7 @@ export const uploadFile = async (file: File, path: string, organizationId: strin
     } catch (error: any) {
         if (error?.code === 'appcheck/not-configured') {
             error.message =
-                'Firebase App Check no está configurado en el front. Definí VITE_FIREBASE_APPCHECK_SITE_KEY antes de subir archivos protegidos.';
+                `Firebase App Check no está operativo en el front (proveedor configurado: ${appCheckProviderLabel}). Definí VITE_FIREBASE_APPCHECK_SITE_KEY, verificá que el dominio esté autorizado en la consola de ${appCheckProviderLabel} y que el proveedor de App Check coincida con el configurado en Firebase.`;
         }
         console.error("[DB Service] ERROR CRÍTICO AL SUBIR:", {
             message: error.message,

@@ -50,6 +50,11 @@ const APP_CHECK_PROVIDER = String(
 ).toLowerCase();
 const RESOLVED_APPCHECK_PROVIDER =
   APP_CHECK_PROVIDER === "enterprise" ? "enterprise" : "v3";
+const APP_CHECK_PROVIDER_LABEL =
+  RESOLVED_APPCHECK_PROVIDER === "enterprise"
+    ? "reCAPTCHA Enterprise"
+    : "reCAPTCHA v3";
+export const appCheckProviderLabel = APP_CHECK_PROVIDER_LABEL;
 
 if (
   typeof window !== "undefined" &&
@@ -63,19 +68,64 @@ if (
 
 export let isAppCheckConfigured = Boolean(APP_CHECK_SITE_KEY) && !APP_CHECK_FORCE_DISABLE;
 
+const normalizeError = (error: unknown): { code?: string; message?: string } => {
+  if (error && typeof error === "object") {
+    const maybeError = error as { code?: unknown; message?: unknown };
+    return {
+      code: typeof maybeError.code === "string" ? maybeError.code : undefined,
+      message: typeof maybeError.message === "string" ? maybeError.message : undefined,
+    };
+  }
+  if (typeof error === "string") {
+    return { message: error };
+  }
+  return {};
+};
+
+const buildAppCheckHint = (error?: unknown): string => {
+  if (APP_CHECK_FORCE_DISABLE) {
+    return "Firebase App Check está deshabilitado manualmente (VITE_FIREBASE_DISABLE_APPCHECK=true). Revertí el cambio para volver a proteger las funciones en la nube.";
+  }
+
+  const parts: string[] = [
+    `Firebase App Check no está operativo. Proveedor configurado: ${APP_CHECK_PROVIDER_LABEL}.`,
+    "Verificá que VITE_FIREBASE_APPCHECK_SITE_KEY esté definido y que el dominio actual figure como permitido en la consola de App Check.",
+    "Tras actualizar la consola o las variables de entorno, redeployá la app y recargá la página en modo incógnito para limpiar tokens antiguos.",
+  ];
+
+  if (!APP_CHECK_SITE_KEY) {
+    parts.push("La variable VITE_FIREBASE_APPCHECK_SITE_KEY no está definida en el entorno del front.");
+  }
+
+  const { code, message } = normalizeError(error);
+
+  if (
+    RESOLVED_APPCHECK_PROVIDER === "v3" &&
+    ((code && code.includes("initial-throttle")) || message?.includes("exchangeRecaptchaV3Token"))
+  ) {
+    parts.push(
+      "El error 400 en exchangeRecaptchaV3Token suele aparecer cuando la app web sigue registrada como reCAPTCHA Enterprise en Firebase App Check. Ingresá a Firebase → App Check → tu app web y elegí el proveedor 'reCAPTCHA' (no Enterprise), luego actualizá la site key v3 en Vercel.",
+    );
+  }
+
+  if (
+    RESOLVED_APPCHECK_PROVIDER === "enterprise" &&
+    message?.includes("exchangeRecaptchaEnterpriseToken")
+  ) {
+    parts.push(
+      "Estás usando ReCaptchaEnterpriseProvider en el front pero la consola de Firebase parece configurada con reCAPTCHA v3. Cambiá VITE_FIREBASE_APPCHECK_PROVIDER=v3 o ajustá Firebase App Check a reCAPTCHA Enterprise y usá una clave Enterprise.",
+    );
+  }
+
+  return parts.join(" ");
+};
+
 const logAppCheckMisconfiguration = (error?: unknown) => {
   if (appCheckWarningLogged) {
     return;
   }
   appCheckWarningLogged = true;
-  const expectedProvider =
-    RESOLVED_APPCHECK_PROVIDER === "enterprise"
-      ? "reCAPTCHA Enterprise"
-      : "reCAPTCHA v3";
-  const hint =
-    APP_CHECK_FORCE_DISABLE
-      ? "Firebase App Check está deshabilitado manualmente (VITE_FIREBASE_DISABLE_APPCHECK=true). Revertí el cambio para volver a proteger las funciones en la nube."
-      : `Firebase App Check no está operativo. Verificá que VITE_FIREBASE_APPCHECK_SITE_KEY esté definido, que el dominio actual esté habilitado en la consola de ${expectedProvider} y que el proveedor configurado coincida con el de Firebase.`;
+  const hint = buildAppCheckHint(error);
   if (error) {
     console.error(hint, error);
   } else {

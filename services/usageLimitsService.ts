@@ -1,13 +1,18 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable, HttpsCallable } from 'firebase/functions';
-import { db, functions as cloudFunctions, isAppCheckConfigured } from '../firebaseConfig';
+import {
+  appCheckProviderLabel,
+  db,
+  functions as cloudFunctions,
+  isAppCheckConfigured,
+} from '../firebaseConfig';
 import { UsageLimitsState } from '../types';
 
 export type UsageServiceCategory = 'document' | 'assistant';
 
 const createAppCheckError = (): Error & { code?: string } => {
   const error = new Error(
-    'Firebase App Check no está operativo. Asegurate de definir VITE_FIREBASE_APPCHECK_SITE_KEY y de autorizar este dominio en reCAPTCHA v3 antes de usar funciones protegidas.'
+    `Firebase App Check no está operativo (proveedor configurado: ${appCheckProviderLabel}). Asegurate de definir VITE_FIREBASE_APPCHECK_SITE_KEY, autorizar este dominio en la consola de ${appCheckProviderLabel} y verificar que el proveedor elegido en Firebase App Check coincida con el del front.`
   ) as Error & { code?: string };
   error.code = 'appcheck/not-configured';
   return error;

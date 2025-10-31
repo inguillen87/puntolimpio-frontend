@@ -39,3 +39,5 @@ Firebase App Check debe estar activo tanto en producción como en los despliegue
    - Configurá `VITE_FIREBASE_APPCHECK_SITE_KEY` y `VITE_FIREBASE_APPCHECK_PROVIDER=enterprise` en Vercel antes de redeployar.
 
 La aplicación inicializa App Check antes de tocar Firestore, Storage o Functions. Solo en desarrollo local (`npm run dev`) podés establecer `VITE_FIREBASE_DISABLE_APPCHECK=true` para depurar en dominios no autorizados; la bandera se ignora automáticamente en producción.
+
+> 💡 Después de cambiar el proveedor o la site key en Firebase/App Check, recordá redeployar la app con las nuevas variables de entorno y abrirla en una ventana de incógnito. Así evitás tokens viejos que provocan el error `appCheck/initial-throttle` mientras Firebase propaga la configuración.
