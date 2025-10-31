@@ -493,15 +493,34 @@ const AppContent: React.FC = () => {
     }
 
     let documentUrl = '';
+    let usedRemoteUpload = false;
+    let fallbackNotice: React.ReactNode | null = null;
     if (documentFile) {
+        const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
         try {
-            const fileName = `${orgId}/documents/${Date.now()}-${documentFile.name}`;
             documentUrl = await databaseService.uploadFile(documentFile, fileName, orgId);
+            usedRemoteUpload = isFirebaseConfigured;
+        } catch (error: any) {
+            if (error?.code === 'appcheck/not-configured') {
+                console.warn(
+                    'App Check no está operativo; se utilizará la subida local como fallback para completar el flujo.',
+                    error
+                );
+                documentUrl = await mockDb.uploadFile(documentFile, fileName, orgId);
+                fallbackNotice = (
+                    <p className="mt-2 text-yellow-200">
+                        Subida en modo demo: configurá <code>VITE_FIREBASE_APPCHECK_SITE_KEY</code> y autorizá este dominio en reCAPTCHA v3 para volver a usar el almacenamiento seguro.
+                    </p>
+                );
+            } else {
+                showNotification(`Falló la subida del archivo: ${error.code || error.message}`, true);
+                throw error;
+            }
+        }
+
+        if (usedRemoteUpload) {
             registerMediaConsumption();
             await refreshUsage();
-        } catch (error: any) {
-             showNotification(`Falló la subida del archivo: ${error.code || error.message}`, true);
-             throw error;
         }
     }
 
@@ -600,6 +619,14 @@ const AppContent: React.FC = () => {
             </div>
           );
         }
+        if (fallbackNotice) {
+          notificationMessage = (
+            <div>
+              {notificationMessage}
+              {fallbackNotice}
+            </div>
+          );
+        }
 
         showNotification(notificationMessage);
         setActiveTab('analytics'); // Go to analytics to see the changes
@@ -690,6 +717,14 @@ const AppContent: React.FC = () => {
             <div>
               {successMessage}
               {updatedSnapshot ? renderDemoUsageNote(updatedSnapshot) : null}
+            </div>
+          );
+        }
+        if (fallbackNotice) {
+          successMessage = (
+            <div>
+              {successMessage}
+              {fallbackNotice}
             </div>
           );
         }
